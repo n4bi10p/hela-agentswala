@@ -62,6 +62,7 @@ export async function connectWallet(): Promise<string> {
     if (!accounts.length) {
       throw new ChainIntegrationError("invalid_input", "No account connected");
     }
+    persistConnectedAccount(accounts[0]);
     return accounts[0];
   } catch (error) {
     throw normalizeChainError(error, "Failed to connect wallet");
@@ -79,15 +80,16 @@ export async function getCurrentAccount(): Promise<string | null> {
 }
 
 export async function getConnectedAccount(): Promise<string | null> {
-  const persisted = getPersistedConnectedAccount();
-  if (!persisted) {
-    return null;
-  }
-
   const current = await getCurrentAccount();
   if (!current) {
     clearConnectedAccount();
     return null;
+  }
+
+  const persisted = getPersistedConnectedAccount();
+  if (!persisted) {
+    persistConnectedAccount(current);
+    return current;
   }
 
   if (current.toLowerCase() !== persisted.toLowerCase()) {

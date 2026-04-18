@@ -1,196 +1,416 @@
+import { randomUUID } from "node:crypto";
+import { isAddress } from "ethers";
 import { NextResponse } from "next/server";
-import { callGemini } from "../../../../lib/gemini";
+import { scheduleAgent } from "@/lib/cronManager";
+import { callGemini } from "@/lib/gemini";
+import { getTokenPrice } from "@/lib/priceService";
 
-type TradingInput = {
+type Direction = "above" | "below";
+type ExecutionAction = "alert" | "simulate-swap";
+type MonitorFrequency = "minutely" | "hourly" | "daily" | "weekly" | "monthly";
+
+type TradingConfig = {
   tokenPair: string;
   thresholdPrice: number;
-  action: string;
+  direction: Direction;
+  action: ExecutionAction;
   amount: number;
-  currentPrice: number;
+  userAddress: string;
+  enableMonitoring: boolean;
+  monitorFrequency: MonitorFrequency;
+  currentPriceFallback: number | null;
 };
 
-type TradingResult = {
+type RequestBody = {
+  config?: Partial<TradingConfig> & { action?: string; direction?: string };
+} & Partial<TradingConfig> & { action?: string; direction?: string };
+
+type SimulatedSwap = {
+  inputAmount: number;
+  outputAmount: number;
+  rate: number;  
+  priceImpact: number;
+};
+
+type TradingResponse = {
   triggered: boolean;
+  currentPrice: number;
+  thresholdPrice: number;
+  direction: Direction;
+  priceDiff: number;
   analysis: string;
-  simulatedAction: string;
+  simulatedSwap: SimulatedSwap | null;
+  checkedAt: string;
+  monitorJobId: string | null;
 };
 
-type RouteError = {
-  statusCode?: number;
-  message?: string;
+type TradingState = {
+  checks: number;
+  lastPrice: number;
+  lastTriggered: boolean;
+  lastCheckedAt: string;
 };
 
-function humanizeFieldName(field: string): string {
-  const withoutPrefix = field.replace(/^payload\./, "");
-  return withoutPrefix
-    .replace(/\./g, " ")
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .toLowerCase();
+const tradingState = new Map<string, TradingState>();
+
+const TOKEN_TO_COINGECKO: Record<string, string> = {
+  bitcoin: "bitcoin",
+  btc: "bitcoin",
+  ethereum: "ethereum",
+  eth: "ethereum",
+  hela: "bitcoin",
+  hla: "bitcoin",
+  hlusd: "hlusd",
+  usdcoin: "usd-coin",
+  usdc: "usd-coin",
+  tether: "tether",
+  usdt: "tether",
+  chainlink: "chainlink",
+  link: "chainlink",
+  solana: "solana",
+  sol: "solana"
+};
+
+const STABLE_USD_SYMBOLS = new Set(["hlusd", "usdc", "usdcoin", "usdt", "tether", "dai", "usd"]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
-function toNaturalLanguageError(status: number, rawMessage: string | undefined, serverFallback: string): string {
-  if (status >= 500) {
-    return serverFallback;
+function asFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
   }
-
-  const message = (rawMessage || "").trim();
-  if (!message) {
-    return "We could not understand the request. Please check your input and try again.";
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : null;
   }
-
-  if (message === "Malformed JSON body.") {
-    return "The request body is not valid JSON. Please fix the JSON format and try again.";
-  }
-  if (message === "Request body must be a JSON object.") {
-    return "Please send a JSON object in the request body.";
-  }
-
-  const requiredMatch = message.match(/^(.+) is required\.$/);
-  if (requiredMatch) {
-    return `Please provide ${humanizeFieldName(requiredMatch[1])}.`;
-  }
-
-  const validNumberMatch = message.match(/^(.+) must be a valid number\.$/);
-  if (validNumberMatch) {
-    return `Please provide a valid number for ${humanizeFieldName(validNumberMatch[1])}.`;
-  }
-
-  const positiveNumberMatch = message.match(/^(.+) must be a number greater than 0\.$/);
-  if (positiveNumberMatch) {
-    return `Please provide a number greater than 0 for ${humanizeFieldName(positiveNumberMatch[1])}.`;
-  }
-
-  const nonNegativeNumberMatch = message.match(/^(.+) must be a non-negative number\.$/);
-  if (nonNegativeNumberMatch) {
-    return `Please provide a non-negative number for ${humanizeFieldName(nonNegativeNumberMatch[1])}.`;
-  }
-
-  const oneOfMatch = message.match(/^(.+) must be one of (.+)\.$/);
-  if (oneOfMatch) {
-    return `Please choose ${humanizeFieldName(oneOfMatch[1])} from: ${oneOfMatch[2]}.`;
-  }
-
-  if (message === "startDate must be a valid ISO date string.") {
-    return "Please provide start date in valid ISO format, for example 2026-04-18T00:00:00.000Z.";
-  }
-  if (message === "payload must be a JSON object.") {
-    return "Please send payload as a JSON object.";
-  }
-  if (message === "agentType is invalid.") {
-    return "The selected agent type is not supported. Use trading, farming, scheduling, rebalancing, content, or business.";
-  }
-  if (message === "Gemini rate limit reached. Please retry shortly.") {
-    return "The AI service is busy right now. Please retry in a moment.";
-  }
-  if (message === "Prompt cannot be empty.") {
-    return "Please enter a message before sending the request.";
-  }
-  if (message === "Prompt is too large." || message === "System context is too large.") {
-    return "Your request is too long. Please shorten it and try again.";
-  }
-
-  return "Please review your request and try again.";
+  return null;
 }
 
-function isValidNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
+function asString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
-function parseInput(body: unknown): TradingInput {
-  if (!body || typeof body !== "object") {
+function parseDirection(rawDirection: string | null, legacyAction: string | null): Direction {
+  if (rawDirection === "above" || rawDirection === "below") {
+    return rawDirection;
+  }
+
+  if (legacyAction === "buy") {
+    return "below";
+  }
+
+  return "above";
+}
+
+function parseExecutionAction(rawAction: string | null): ExecutionAction {
+  if (rawAction === "hold") {
+    return "alert";
+  }
+
+  if (rawAction === "alert" || rawAction === "simulate-swap") {
+    return rawAction;
+  }
+
+  return "simulate-swap";
+}
+
+function parseMonitorFrequency(raw: unknown): MonitorFrequency {
+  if (typeof raw !== "string") {
+    return "minutely";
+  }
+
+  const normalized = raw.trim().toLowerCase();
+  if (
+    normalized === "minutely" ||
+    normalized === "hourly" ||
+    normalized === "daily" ||
+    normalized === "weekly" ||
+    normalized === "monthly"
+  ) {
+    return normalized;
+  }
+
+  return "minutely";
+}
+
+function normalizeSymbol(rawToken: string): string {
+  return rawToken.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function resolvePriceToken(tokenPair: string): string {
+  const firstToken = tokenPair.split(/[\/:\-_\s]/)[0]?.trim() || tokenPair;
+  const normalized = normalizeSymbol(firstToken);
+  return TOKEN_TO_COINGECKO[normalized] || normalized;
+}
+
+function splitTokenPair(tokenPair: string): string[] {
+  return tokenPair
+    .split(/[\/:\-_\s]+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+async function resolveUsdPrice(symbolOrId: string): Promise<number | null> {
+  const normalized = normalizeSymbol(symbolOrId);
+  if (!normalized) {
+    return null;
+  }
+
+  if (STABLE_USD_SYMBOLS.has(normalized)) {
+    return 1;
+  }
+
+  const resolvedId = TOKEN_TO_COINGECKO[normalized] || normalized;
+
+  try {
+    return await getTokenPrice(resolvedId);
+  } catch {
+    return null;
+  }
+}
+
+async function resolveCurrentPrice(tokenPair: string, currentPriceFallback: number | null): Promise<number> {
+  const tokens = splitTokenPair(tokenPair);
+  const baseToken = tokens[0] || tokenPair;
+  const quoteToken = tokens.length > 1 ? tokens[1] : null;
+
+  const baseUsd = await resolveUsdPrice(baseToken);
+  let resolved: number | null = null;
+
+  if (baseUsd !== null) {
+    if (quoteToken) {
+      const quoteUsd = await resolveUsdPrice(quoteToken);
+      if (quoteUsd !== null && quoteUsd > 0) {
+        resolved = baseUsd / quoteUsd;
+      } else {
+        resolved = baseUsd;
+      }
+    } else {
+      resolved = baseUsd;
+    }
+  }
+
+  if (resolved !== null && Number.isFinite(resolved) && resolved > 0) {
+    return resolved;
+  }
+
+  if (currentPriceFallback !== null && currentPriceFallback > 0) {
+    console.log(`[TRADING] Falling back to provided currentPrice for ${tokenPair}`);
+    return currentPriceFallback;
+  }
+
+  throw {
+    statusCode: 400,
+    message: `Unable to resolve live price for ${tokenPair}. Use a supported token pair or provide currentPrice.`
+  };
+}
+
+function parseBody(body: unknown): TradingConfig {
+  if (!isRecord(body)) {
     throw { statusCode: 400, message: "Request body must be a JSON object." };
   }
 
-  const input = body as Partial<TradingInput>;
-  if (!input.tokenPair || typeof input.tokenPair !== "string") {
-    throw { statusCode: 400, message: "tokenPair is required." };
-  }
-  if (!input.action || typeof input.action !== "string") {
-    throw { statusCode: 400, message: "action is required." };
-  }
-  if (!isValidNumber(input.thresholdPrice)) {
-    throw { statusCode: 400, message: "thresholdPrice must be a valid number." };
-  }
-  if (!isValidNumber(input.currentPrice)) {
-    throw { statusCode: 400, message: "currentPrice must be a valid number." };
-  }
-  if (!isValidNumber(input.amount) || input.amount <= 0) {
-    throw { statusCode: 400, message: "amount must be a number greater than 0." };
+  const source = isRecord(body.config) ? body.config : body;
+
+  const tokenPair = asString(source.tokenPair);
+  if (!tokenPair) {
+    throw { statusCode: 400, message: "config.tokenPair is required." };
   }
 
+  const thresholdPrice = asFiniteNumber(source.thresholdPrice);
+  if (thresholdPrice === null || thresholdPrice <= 0) {
+    throw { statusCode: 400, message: "config.thresholdPrice must be a number greater than 0." };
+  }
+
+  const amount = asFiniteNumber(source.amount);
+  if (amount === null || amount <= 0) {
+    throw { statusCode: 400, message: "config.amount must be a number greater than 0." };
+  }
+
+  const currentPriceFallback = asFiniteNumber(source.currentPrice);
+  if (currentPriceFallback !== null && currentPriceFallback <= 0) {
+    throw { statusCode: 400, message: "config.currentPrice must be a number greater than 0." };
+  }
+
+  const legacyAction = asString(source.action)?.toLowerCase() || null;
+  const direction = parseDirection(asString(source.direction)?.toLowerCase() || null, legacyAction);
+  const action = parseExecutionAction(legacyAction);
+
+  const rawUserAddress = asString(source.userAddress);
+  const userAddress = rawUserAddress || "0x0000000000000000000000000000000000000000";
+  if (rawUserAddress && !isAddress(rawUserAddress)) {
+    throw { statusCode: 400, message: "config.userAddress must be a valid wallet address." };
+  }
+
+  const enableMonitoring = source.enableMonitoring === true;
+  const monitorFrequency = parseMonitorFrequency(source.monitorFrequency);
+
   return {
-    tokenPair: input.tokenPair.trim(),
-    thresholdPrice: input.thresholdPrice,
-    action: input.action.trim().toLowerCase(),
-    amount: input.amount,
-    currentPrice: input.currentPrice
+    tokenPair: tokenPair.toLowerCase(),
+    thresholdPrice,
+    direction,
+    action,
+    amount,
+    userAddress,
+    enableMonitoring,
+    monitorFrequency,
+    currentPriceFallback
   };
 }
 
-function isTriggered(input: TradingInput): boolean {
-  if (input.action === "buy") {
-    return input.currentPrice <= input.thresholdPrice;
-  }
-  if (input.action === "sell") {
-    return input.currentPrice >= input.thresholdPrice;
-  }
-  return Math.abs(input.currentPrice - input.thresholdPrice) < Number.EPSILON;
+function toStateKey(config: TradingConfig): string {
+  return `${config.userAddress.toLowerCase()}:${config.tokenPair}`;
 }
 
-async function runTradingAgent(input: TradingInput): Promise<TradingResult> {
-  const triggered = isTriggered(input);
+function computeTriggered(currentPrice: number, thresholdPrice: number, direction: Direction): boolean {
+  return direction === "above" ? currentPrice >= thresholdPrice : currentPrice <= thresholdPrice;
+}
 
-  let analysis = "[SIMULATED] Threshold not crossed. No market analysis required yet.";
-  if (triggered) {
-    try {
-      analysis = await callGemini(
-        [
-          "You are a crypto market assistant.",
-          "Provide a short market analysis in 2-3 sentences.",
-          `Token pair: ${input.tokenPair}`,
-          `Action: ${input.action}`,
-          `Threshold price: ${input.thresholdPrice}`,
-          `Current price: ${input.currentPrice}`,
-          `Amount: ${input.amount}`
-        ].join("\n")
-      );
-    } catch {
-      analysis = "[SIMULATED] Trigger fired, but AI market analysis is temporarily unavailable.";
+function computePriceDiff(currentPrice: number, thresholdPrice: number): number {
+  return Number((((currentPrice - thresholdPrice) / thresholdPrice) * 100).toFixed(4));
+}
+
+function computePriceImpact(config: TradingConfig): number {
+  const seed = `${config.tokenPair}:${config.userAddress}:${config.thresholdPrice}`;
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash + seed.charCodeAt(index) * (index + 11)) % 10_000;
+  }
+
+  const bounded = 0.1 + (hash % 201) / 1000;
+  return Number(bounded.toFixed(3));
+}
+
+async function buildAnalysis(config: TradingConfig, currentPrice: number, triggered: boolean, priceDiff: number): Promise<string> {
+  const prompt = [
+    `You are a crypto trading analyst. Current ${config.tokenPair} price: $${currentPrice}.`,
+    `User threshold: $${config.thresholdPrice} (${config.direction}).`,
+    `Threshold ${triggered ? "HAS BEEN" : "has NOT been"} triggered.`,
+    `Price difference: ${priceDiff}%.`,
+    "Provide a 3-sentence market analysis: current trend, what this means for the user, recommended action.",
+    "Be specific with numbers. No generic advice."
+  ].join("\n");
+
+  return callGemini(prompt);
+}
+
+function simulateSwap(config: TradingConfig, currentPrice: number, triggered: boolean): SimulatedSwap | null {
+  if (config.action !== "simulate-swap" || !triggered) {
+    return null;
+  }
+
+  const priceImpact = computePriceImpact(config);
+  const grossOutput = config.amount / currentPrice;
+  const outputAmount = grossOutput * (1 - priceImpact / 100);
+
+  return {
+    inputAmount: Number(config.amount.toFixed(6)),
+    outputAmount: Number(outputAmount.toFixed(8)),
+    rate: Number(currentPrice.toFixed(8)),
+    priceImpact
+  };
+}
+
+function updateState(config: TradingConfig, currentPrice: number, triggered: boolean, checkedAt: string): void {
+  const key = toStateKey(config);
+  const existing = tradingState.get(key);
+  const nextChecks = existing ? existing.checks + 1 : 1;
+
+  tradingState.set(key, {
+    checks: nextChecks,
+    lastPrice: currentPrice,
+    lastTriggered: triggered,
+    lastCheckedAt: checkedAt
+  });
+}
+
+function startMonitorIfRequested(config: TradingConfig): string | null {
+  if (!config.enableMonitoring) {
+    return null;
+  }
+
+  if (!isAddress(config.userAddress)) {
+    return null;
+  }
+
+  const monitorJobId = `trading-${randomUUID()}`;
+
+  scheduleAgent(
+    monitorJobId,
+    "trading",
+    config.userAddress,
+    {
+      tokenPair: config.tokenPair,
+      thresholdPrice: config.thresholdPrice,
+      direction: config.direction
+    },
+    config.monitorFrequency,
+    async (runtimeConfig) => {
+      const token = asString(runtimeConfig.tokenPair) || config.tokenPair;
+      const threshold = asFiniteNumber(runtimeConfig.thresholdPrice) ?? config.thresholdPrice;
+      const direction = parseDirection(asString(runtimeConfig.direction), null);
+      const fallbackPrice = asFiniteNumber(runtimeConfig.currentPrice);
+      const current = await resolveCurrentPrice(token, fallbackPrice);
+      const triggered = computeTriggered(current, threshold, direction);
+      const result = `${token} monitor check: ${current} vs ${threshold} (${direction}) => ${triggered}`;
+      console.log(`[TRADING] [MONITOR] ${result}`);
+      return { result };
     }
-  }
+  );
 
-  return {
-    triggered,
-    analysis,
-    simulatedAction: triggered
-      ? `[SIMULATED] ${input.action.toUpperCase()} ${input.amount} ${input.tokenPair} at ${input.currentPrice}`
-      : `[SIMULATED] No trade executed for ${input.tokenPair}`
-  };
+  return monitorJobId;
 }
 
 export async function POST(req: Request) {
+  console.log("[TRADING] Received request");
+
   try {
-    const body = await req.json();
-    const input = parseInput(body);
-    const result = await runTradingAgent(input);
-    return NextResponse.json(result, { status: 200 });
+    const body = (await req.json()) as RequestBody;
+    const config = parseBody(body);
+
+    const priceToken = resolvePriceToken(config.tokenPair);
+    console.log(`[TRADING] Fetching real price for ${config.tokenPair} (${priceToken})`);
+    const currentPrice = await resolveCurrentPrice(config.tokenPair, config.currentPriceFallback);
+    const triggered = computeTriggered(currentPrice, config.thresholdPrice, config.direction);
+    const priceDiff = computePriceDiff(currentPrice, config.thresholdPrice);
+
+    console.log("[TRADING] Generating Gemini analysis");
+    const analysis = await buildAnalysis(config, currentPrice, triggered, priceDiff);
+
+    const simulatedSwap = simulateSwap(config, currentPrice, triggered);
+    const checkedAt = new Date().toISOString();
+    updateState(config, currentPrice, triggered, checkedAt);
+
+    const monitorJobId = startMonitorIfRequested(config);
+
+    const response: TradingResponse = {
+      triggered,
+      currentPrice: Number(currentPrice.toFixed(8)),
+      thresholdPrice: Number(config.thresholdPrice.toFixed(8)),
+      direction: config.direction,
+      priceDiff,
+      analysis,
+      simulatedSwap,
+      checkedAt,
+      monitorJobId
+    };
+
+    return NextResponse.json(response, { status: 200 });
   } catch (error: unknown) {
     if (error instanceof SyntaxError) {
-      return NextResponse.json(
-        {
-          error: toNaturalLanguageError(400, "Malformed JSON body.", "Trading agent execution failed.")
-        },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Malformed JSON body." }, { status: 400 });
     }
-    const mapped = error as RouteError;
-    const status = mapped.statusCode && mapped.statusCode >= 400 ? mapped.statusCode : 500;
-    const errorMessage = toNaturalLanguageError(status, mapped.message, "Trading agent execution failed.");
-    return NextResponse.json(
-      {
-        error: errorMessage
-      },
-      { status }
-    );
+
+    const mapped = error as { statusCode?: number; message?: string };
+    const statusCode = mapped.statusCode && mapped.statusCode >= 400 ? mapped.statusCode : 500;
+    const message = mapped.message || "Trading agent execution failed.";
+    console.error(`[TRADING] Error: ${message}`);
+    return NextResponse.json({ error: message }, { status: statusCode });
   }
 }

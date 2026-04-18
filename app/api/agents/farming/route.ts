@@ -1,175 +1,321 @@
+import { randomUUID } from "node:crypto";
+import { isAddress } from "ethers";
 import { NextResponse } from "next/server";
-import { callGemini } from "../../../../lib/gemini";
+import { scheduleAgent } from "@/lib/cronManager";
+import { callGemini } from "@/lib/gemini";
+import { getWalletNativeBalance, simulateLPPosition } from "@/lib/walletMonitor";
 
-type FarmingInput = {
-  lpAddress: string;
-  compoundThreshold: number;
-  currentAPY: number;
+type RiskLevel = "low" | "medium" | "high";
+type MonitorFrequency = "minutely" | "hourly" | "daily" | "weekly" | "monthly";
+
+type FarmingConfig = {
+  protocol: string;
+  poolType: string;
+  amount: number;
+  durationDays: number;
+  userAddress: string;
+  riskLevel: RiskLevel;
+  enableMonitoring: boolean;
+  monitorFrequency: MonitorFrequency;
 };
 
-type FarmingResult = {
-  shouldCompound: boolean;
+type LpData = {
+  totalValueLocked: number;
+  apy: number;
+  fees24h: number;
+  volume24h: number;
+};
+
+type FarmingResponse = {
   recommendation: string;
-  simulatedYield: number;
+  projectedEarnings: number;
+  riskAssessment: string;
+  lpData: LpData;
+  warning?: string;
+  monitorJobId: string | null;
 };
 
-type RouteError = {
-  statusCode?: number;
-  message?: string;
+type FarmingState = {
+  checks: number;
+  lastProjectedEarnings: number;
+  lastApy: number;
+  lastCheckedAt: string;
 };
 
-function humanizeFieldName(field: string): string {
-  const withoutPrefix = field.replace(/^payload\./, "");
-  return withoutPrefix
-    .replace(/\./g, " ")
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .toLowerCase();
+const farmingState = new Map<string, FarmingState>();
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
-function toNaturalLanguageError(status: number, rawMessage: string | undefined, serverFallback: string): string {
-  if (status >= 500) {
-    return serverFallback;
+function asString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
   }
-
-  const message = (rawMessage || "").trim();
-  if (!message) {
-    return "We could not understand the request. Please check your input and try again.";
-  }
-
-  if (message === "Malformed JSON body.") {
-    return "The request body is not valid JSON. Please fix the JSON format and try again.";
-  }
-  if (message === "Request body must be a JSON object.") {
-    return "Please send a JSON object in the request body.";
-  }
-  if (message === "payload must be a JSON object.") {
-    return "Please send payload as a JSON object.";
-  }
-  if (message === "agentType is invalid.") {
-    return "The selected agent type is not supported. Use trading, farming, scheduling, rebalancing, content, or business.";
-  }
-  if (message === "Gemini rate limit reached. Please retry shortly.") {
-    return "The AI service is busy right now. Please retry in a moment.";
-  }
-  if (message === "Prompt cannot be empty.") {
-    return "Please enter a message before sending the request.";
-  }
-  if (message === "Prompt is too large." || message === "System context is too large.") {
-    return "Your request is too long. Please shorten it and try again.";
-  }
-
-  const requiredMatch = message.match(/^(.+) is required\.$/);
-  if (requiredMatch) {
-    return `Please provide ${humanizeFieldName(requiredMatch[1])}.`;
-  }
-
-  const validNumberMatch = message.match(/^(.+) must be a valid number\.$/);
-  if (validNumberMatch) {
-    return `Please provide a valid number for ${humanizeFieldName(validNumberMatch[1])}.`;
-  }
-
-  const positiveNumberMatch = message.match(/^(.+) must be a number greater than 0\.$/);
-  if (positiveNumberMatch) {
-    return `Please provide a number greater than 0 for ${humanizeFieldName(positiveNumberMatch[1])}.`;
-  }
-
-  const nonNegativeNumberMatch = message.match(/^(.+) must be a non-negative number\.$/);
-  if (nonNegativeNumberMatch) {
-    return `Please provide a non-negative number for ${humanizeFieldName(nonNegativeNumberMatch[1])}.`;
-  }
-
-  const oneOfMatch = message.match(/^(.+) must be one of (.+)\.$/);
-  if (oneOfMatch) {
-    return `Please choose ${humanizeFieldName(oneOfMatch[1])} from: ${oneOfMatch[2]}.`;
-  }
-
-  if (message === "startDate must be a valid ISO date string.") {
-    return "Please provide start date in valid ISO format, for example 2026-04-18T00:00:00.000Z.";
-  }
-
-  return "Please review your request and try again.";
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
-function isValidNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
+function asFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
-function parseInput(body: unknown): FarmingInput {
-  if (!body || typeof body !== "object") {
+function parseDurationDays(value: unknown): number {
+  const numericValue = asFiniteNumber(value);
+  if (numericValue !== null && numericValue > 0) {
+    return numericValue;
+  }
+
+  if (typeof value === "string") {
+    const match = value.match(/(\d+(?:\.\d+)?)/);
+    if (match) {
+      const parsed = Number(match[1]);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+  }
+
+  throw { statusCode: 400, message: "config.duration must be a number greater than 0." };
+}
+
+function parseRiskLevel(value: unknown): RiskLevel {
+  const normalized = asString(value)?.toLowerCase();
+  if (normalized === "low" || normalized === "medium" || normalized === "high") {
+    return normalized;
+  }
+  return "medium";
+}
+
+function parseMonitorFrequency(raw: unknown): MonitorFrequency {
+  const normalized = asString(raw)?.toLowerCase();
+  if (
+    normalized === "minutely" ||
+    normalized === "hourly" ||
+    normalized === "daily" ||
+    normalized === "weekly" ||
+    normalized === "monthly"
+  ) {
+    return normalized;
+  }
+  return "hourly";
+}
+
+function parseBody(body: unknown): FarmingConfig {
+  if (!isRecord(body)) {
     throw { statusCode: 400, message: "Request body must be a JSON object." };
   }
 
-  const input = body as Partial<FarmingInput>;
-  if (!input.lpAddress || typeof input.lpAddress !== "string") {
-    throw { statusCode: 400, message: "lpAddress is required." };
+  const source = isRecord(body.config) ? body.config : body;
+
+  const protocol = asString(source.protocol);
+  if (!protocol) {
+    throw { statusCode: 400, message: "config.protocol is required." };
   }
-  if (!isValidNumber(input.compoundThreshold)) {
-    throw { statusCode: 400, message: "compoundThreshold must be a valid number." };
+
+  const poolType = asString(source.poolType);
+  if (!poolType) {
+    throw { statusCode: 400, message: "config.poolType is required." };
   }
-  if (!isValidNumber(input.currentAPY)) {
-    throw { statusCode: 400, message: "currentAPY must be a valid number." };
+
+  const amount = asFiniteNumber(source.amount);
+  if (amount === null || amount <= 0) {
+    throw { statusCode: 400, message: "config.amount must be a number greater than 0." };
+  }
+
+  const durationDays = parseDurationDays(source.durationDays ?? source.duration);
+  const riskLevel = parseRiskLevel(source.riskLevel ?? source.risk);
+
+  const rawUserAddress = asString(source.userAddress ?? source.address);
+  if (rawUserAddress && !isAddress(rawUserAddress)) {
+    throw { statusCode: 400, message: "config.userAddress must be a valid wallet address." };
   }
 
   return {
-    lpAddress: input.lpAddress.trim(),
-    compoundThreshold: input.compoundThreshold,
-    currentAPY: input.currentAPY
+    protocol,
+    poolType,
+    amount,
+    durationDays,
+    userAddress: rawUserAddress || "0x0000000000000000000000000000000000000000",
+    riskLevel,
+    enableMonitoring: source.enableMonitoring === true,
+    monitorFrequency: parseMonitorFrequency(source.monitorFrequency)
   };
 }
 
-async function runFarmingAgent(input: FarmingInput): Promise<FarmingResult> {
-  const shouldCompound = input.currentAPY >= input.compoundThreshold;
-  const simulatedYield = Number((input.currentAPY * 1.015).toFixed(2));
+function projectEarnings(amount: number, apy: number, durationDays: number): number {
+  const projected = amount * (apy / 100) * (durationDays / 365);
+  return Number(projected.toFixed(6));
+}
 
-  let recommendation = "[SIMULATED] APY below threshold. Hold rewards and review later.";
+function parseGeminiSections(text: string): { recommendation: string; riskAssessment: string; keyWarnings: string } {
+  let parsed: unknown = null;
 
-  if (shouldCompound) {
-    try {
-      recommendation = await callGemini(
-        [
-          "You are a DeFi yield farming advisor.",
-          "Explain APY and recommend whether compounding is appropriate in 2-3 concise sentences.",
-          `LP address: ${input.lpAddress}`,
-          `Compound threshold: ${input.compoundThreshold}`,
-          `Current APY: ${input.currentAPY}`,
-          `Simulated yield estimate: ${simulatedYield}`
-        ].join("\n")
-      );
-    } catch {
-      recommendation = "[SIMULATED] APY is above threshold. Compound is recommended, but AI guidance is currently unavailable.";
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    parsed = null;
+  }
+
+  if (isRecord(parsed)) {
+    const recommendation = asString(parsed.recommendation);
+    const riskAssessment = asString(parsed.riskAssessment);
+    const keyWarnings = asString(parsed.keyWarnings);
+
+    if (recommendation && riskAssessment) {
+      return {
+        recommendation,
+        riskAssessment,
+        keyWarnings: keyWarnings || "No material warnings identified."
+      };
     }
   }
 
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const riskAssessment = lines.slice(0, 2).join(" ") || "Risk appears moderate based on current pool metrics.";
+  const recommendation = lines[lines.length - 1] || "Proceed cautiously with size and monitor APY drift.";
+  const keyWarnings = lines.slice(2, 4).join(" ") || "APY and fees can change quickly based on liquidity.";
+
   return {
-    shouldCompound,
     recommendation,
-    simulatedYield
+    riskAssessment,
+    keyWarnings
   };
+}
+
+async function buildAnalysis(config: FarmingConfig, apy: number): Promise<{ recommendation: string; riskAssessment: string; keyWarnings: string }> {
+  const prompt = [
+    "Analyze this DeFi farming opportunity:",
+    `Protocol: ${config.protocol}`,
+    `Pool: ${config.poolType}`,
+    `Amount: ${config.amount} ETH`,
+    `APY: ${apy}%`,
+    `Duration: ${config.durationDays} days`,
+    `Risk level: ${config.riskLevel}`,
+    "",
+    "Provide:",
+    "1. Risk assessment (2 sentences)",
+    "2. Estimated returns",
+    "3. Key warning points",
+    "4. Recommendation (yes/no with reason)",
+    "",
+    "Return valid JSON with exactly these keys: riskAssessment, keyWarnings, recommendation."
+  ].join("\n");
+
+  const geminiText = await callGemini(prompt);
+  return parseGeminiSections(geminiText);
+}
+
+function toStateKey(config: FarmingConfig): string {
+  return `${config.userAddress.toLowerCase()}:${config.protocol.toLowerCase()}:${config.poolType.toLowerCase()}`;
+}
+
+function updateState(config: FarmingConfig, projectedEarnings: number, apy: number): void {
+  const key = toStateKey(config);
+  const existing = farmingState.get(key);
+  farmingState.set(key, {
+    checks: existing ? existing.checks + 1 : 1,
+    lastProjectedEarnings: projectedEarnings,
+    lastApy: apy,
+    lastCheckedAt: new Date().toISOString()
+  });
+}
+
+function startMonitor(config: FarmingConfig): string | null {
+  if (!config.enableMonitoring || !isAddress(config.userAddress)) {
+    return null;
+  }
+
+  const monitorJobId = `farming-${randomUUID()}`;
+  scheduleAgent(
+    monitorJobId,
+    "farming",
+    config.userAddress,
+    {
+      protocol: config.protocol,
+      poolType: config.poolType,
+      amount: config.amount,
+      durationDays: config.durationDays
+    },
+    config.monitorFrequency,
+    async (runtimeConfig) => {
+      const protocol = asString(runtimeConfig.protocol) || config.protocol;
+      const poolType = asString(runtimeConfig.poolType) || config.poolType;
+      const amount = asFiniteNumber(runtimeConfig.amount) ?? config.amount;
+      const duration = asFiniteNumber(runtimeConfig.durationDays) ?? config.durationDays;
+      const lpData = await simulateLPPosition(`${protocol}:${poolType}`);
+      const projected = projectEarnings(amount, lpData.apy, duration);
+      const result = `Farming monitor check ${protocol}/${poolType}: APY ${lpData.apy}% projected ${projected} ETH`;
+      console.log(`[FARMING] [MONITOR] ${result}`);
+      return { result };
+    }
+  );
+
+  return monitorJobId;
 }
 
 export async function POST(req: Request) {
+  console.log("[FARMING] Received request");
+
   try {
     const body = await req.json();
-    const input = parseInput(body);
-    const result = await runFarmingAgent(input);
-    return NextResponse.json(result, { status: 200 });
+    const config = parseBody(body);
+
+    console.log(`[FARMING] Simulating LP data for ${config.protocol}/${config.poolType}`);
+    const lpRaw = await simulateLPPosition(`${config.protocol}:${config.poolType}`);
+    const lpData: LpData = {
+      totalValueLocked: Number(lpRaw.totalValueLocked.toFixed(2)),
+      apy: Number(lpRaw.apy.toFixed(3)),
+      fees24h: Number(lpRaw.fees24h.toFixed(2)),
+      volume24h: Number(lpRaw.volume24h.toFixed(2))
+    };
+
+    const projectedEarnings = projectEarnings(config.amount, lpData.apy, config.durationDays);
+
+    console.log("[FARMING] Requesting Gemini risk assessment");
+    const ai = await buildAnalysis(config, lpData.apy);
+
+    let warning = ai.keyWarnings;
+    if (isAddress(config.userAddress)) {
+      const gasBalance = await getWalletNativeBalance(config.userAddress);
+      if (gasBalance < 0.01) {
+        warning = `${warning} Low native token balance may cause transaction failures.`;
+      }
+    }
+
+    updateState(config, projectedEarnings, lpData.apy);
+    const monitorJobId = startMonitor(config);
+
+    const response: FarmingResponse = {
+      recommendation: ai.recommendation,
+      projectedEarnings,
+      riskAssessment: ai.riskAssessment,
+      lpData,
+      warning,
+      monitorJobId
+    };
+
+    return NextResponse.json(response, { status: 200 });
   } catch (error: unknown) {
     if (error instanceof SyntaxError) {
-      return NextResponse.json(
-        {
-          error: toNaturalLanguageError(400, "Malformed JSON body.", "Farming agent execution failed.")
-        },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Malformed JSON body." }, { status: 400 });
     }
-    const mapped = error as RouteError;
-    const status = mapped.statusCode && mapped.statusCode >= 400 ? mapped.statusCode : 500;
-    const errorMessage = toNaturalLanguageError(status, mapped.message, "Farming agent execution failed.");
-    return NextResponse.json(
-      {
-        error: errorMessage
-      },
-      { status }
-    );
+
+    const mapped = error as { statusCode?: number; message?: string };
+    const statusCode = mapped.statusCode && mapped.statusCode >= 400 ? mapped.statusCode : 500;
+    const message = mapped.message || "Farming agent execution failed.";
+    console.error(`[FARMING] Error: ${message}`);
+    return NextResponse.json({ error: message }, { status: statusCode });
   }
 }

@@ -206,8 +206,13 @@ export async function POST(req: Request) {
   try {
     console.log("[GENERATE] Step 1: generating schema with Gemini");
 
-    const schemaSystemInstruction =
-      "You are an AI agent schema generator. Return ONLY a valid JSON object with zero markdown, zero preamble, zero explanation. Any non-JSON output will break the system.";
+    const schemaSystemInstruction = [
+      "You are Trovia's AI agent schema generator.",
+      "Return ONLY one valid JSON object. No markdown, no prose, no code fences.",
+      "Every field must be internally consistent: agentType, description, executionLogic, and geminiPrompt must match the same use case.",
+      "Never mix business-assistant behavior with portfolio-rebalancing behavior.",
+      "Any non-JSON output will break production parsing."
+    ].join("\n");
 
     const schemaUserPrompt = `Generate a complete agent schema for this request: ${prompt}
 Return ONLY this exact JSON structure:
@@ -232,7 +237,19 @@ Return ONLY this exact JSON structure:
   geminiPrompt: string (the exact system prompt Gemini uses when THIS agent runs — written as if you ARE the agent executing),
   tags: array of exactly 3 strings,
   estimatedRuntime: string (e.g. every 5 minutes / on trigger / real-time / on demand)
-}`;
+}
+
+Type intent rules (must be respected):
+- trading: price threshold monitoring, trigger alerts, simulated swap/trade actions
+- farming: LP/APY monitoring, compounding decisions, yield optimization guidance
+- scheduling: recurring transfers, cadence logic, next execution calculation
+- rebalancing: portfolio allocation drift, target/current weights, rebalance recommendation
+- content: social/media reply drafting, tone adaptation, response alternatives
+- business: business operations/planning/email/report support (NOT portfolio drift or token allocation)
+
+Critical mismatch rule:
+- If agentType is "business", do not mention rebalancing, allocation drift, or portfolio weight optimization.
+- If agentType is "rebalancing", focus on allocations and drift; do not frame it as generic business assistant output.`;
 
     const firstSchemaRaw = await callGemini(schemaUserPrompt, schemaSystemInstruction);
     let parsedSchema = parseJsonPayload(firstSchemaRaw);
@@ -255,8 +272,12 @@ Return ONLY this exact JSON structure:
     const agent = validated.agent;
     console.log("[GENERATE] Step 2: generating execution function with Gemini");
 
-    const executionSystemInstruction =
-      "You are a JavaScript code generator. Return ONLY valid runnable JavaScript. Zero imports. Zero exports. Zero markdown. Zero explanation. The output will be passed directly to new Function() — any non-code output will cause a runtime crash.";
+    const executionSystemInstruction = [
+      "You are Trovia's JavaScript runtime code generator.",
+      "Return ONLY valid runnable JavaScript.",
+      "No imports, no exports, no markdown, no explanation.",
+      "The output is executed via new Function(); any non-code output will crash runtime."
+    ].join("\n");
 
     const executionUserPrompt = `Generate the execution function for this agent:
 Name: ${agent.name}
@@ -272,10 +293,11 @@ async function executeAgent(config) {
 
 Rules for implementation:
 - Access config values using config['fieldKey'] matching the configSchema keys
-- For content and business agentType: build a detailed prompt using config values, call await callGemini(prompt), return the response as result
+- For content and business agentType: build a detailed prompt using config values and call await callGemini(prompt, systemInstruction)
 - For trading, farming, rebalancing agentType: simulate realistic logic using config values, return structured data object
 - For scheduling agentType: validate config, calculate next execution time, return confirmation
-- callGemini is globally available as callGemini(prompt)
+- For content/business, define: const systemInstruction = ${JSON.stringify(agent.geminiPrompt)}
+- callGemini is globally available as callGemini(prompt, systemInstruction?)
 - Never import anything — callGemini is the only external dependency
 - Wrap everything in try/catch — on error return { success: false, result: error.message }
 - Must be syntactically valid JavaScript (Node.js runtime, no TypeScript type annotations)`;

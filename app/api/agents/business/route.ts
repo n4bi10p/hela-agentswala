@@ -1,147 +1,168 @@
 import { NextResponse } from "next/server";
-import { callGemini } from "../../../../lib/gemini";
+import { callGemini } from "@/lib/gemini";
 
-type Formality = "formal" | "informal";
+type TaskType = "strategy" | "analysis" | "marketing" | "general";
 
-type BusinessInput = {
+type BusinessConfig = {
+  taskType: TaskType;
   query: string;
-  businessContext: string;
+  context: string;
   language: string;
-  formality: Formality;
+  formality: "formal" | "informal";
 };
 
-type BusinessResult = {
-  response: string;
+type BusinessResponse = {
+  result: string;
+  metadata: {
+    taskType: TaskType;
+    confidence: number;
+    generatedAt: string;
+  };
 };
 
-type RouteError = {
-  statusCode?: number;
-  message?: string;
-};
-
-function humanizeFieldName(field: string): string {
-  const withoutPrefix = field.replace(/^payload\./, "");
-  return withoutPrefix
-    .replace(/\./g, " ")
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .toLowerCase();
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
-function toNaturalLanguageError(status: number, rawMessage: string | undefined, serverFallback: string): string {
-  if (status >= 500) {
-    return serverFallback;
+function asString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
   }
-
-  const message = (rawMessage || "").trim();
-  if (!message) {
-    return "We could not understand the request. Please check your input and try again.";
-  }
-
-  if (message === "Malformed JSON body.") {
-    return "The request body is not valid JSON. Please fix the JSON format and try again.";
-  }
-  if (message === "Request body must be a JSON object.") {
-    return "Please send a JSON object in the request body.";
-  }
-  if (message === "payload must be a JSON object.") {
-    return "Please send payload as a JSON object.";
-  }
-  if (message === "agentType is invalid.") {
-    return "The selected agent type is not supported. Use trading, farming, scheduling, rebalancing, content, or business.";
-  }
-  if (message === "Gemini rate limit reached. Please retry shortly.") {
-    return "The AI service is busy right now. Please retry in a moment.";
-  }
-  if (message === "Prompt cannot be empty.") {
-    return "Please enter a message before sending the request.";
-  }
-  if (message === "Prompt is too large." || message === "System context is too large.") {
-    return "Your request is too long. Please shorten it and try again.";
-  }
-  if (message === "formality must be formal or informal.") {
-    return "Please set formality to formal or informal.";
-  }
-
-  const requiredMatch = message.match(/^(.+) is required\.$/);
-  if (requiredMatch) {
-    return `Please provide ${humanizeFieldName(requiredMatch[1])}.`;
-  }
-
-  const oneOfMatch = message.match(/^(.+) must be one of (.+)\.$/);
-  if (oneOfMatch) {
-    return `Please choose ${humanizeFieldName(oneOfMatch[1])} from: ${oneOfMatch[2]}.`;
-  }
-
-  return "Please review your request and try again.";
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
-function parseInput(body: unknown): BusinessInput {
-  if (!body || typeof body !== "object") {
+function parseTaskType(raw: unknown): TaskType {
+  const normalized = asString(raw)?.toLowerCase();
+  if (normalized === "strategy" || normalized === "analysis" || normalized === "marketing") {
+    return normalized;
+  }
+  return "general";
+}
+
+function parseFormality(raw: unknown): "formal" | "informal" {
+  const normalized = asString(raw)?.toLowerCase();
+  return normalized === "informal" ? "informal" : "formal";
+}
+
+function parseBody(body: unknown): BusinessConfig {
+  if (!isRecord(body)) {
     throw { statusCode: 400, message: "Request body must be a JSON object." };
   }
 
-  const input = body as Partial<BusinessInput>;
-  if (!input.query || typeof input.query !== "string") {
+  const source = isRecord(body.config) ? body.config : body;
+
+  const query = asString(source.query);
+  if (!query) {
     throw { statusCode: 400, message: "query is required." };
   }
-  if (!input.businessContext || typeof input.businessContext !== "string") {
+
+  const context = asString(source.context) || asString(source.businessContext) || "";
+  if (!context) {
     throw { statusCode: 400, message: "businessContext is required." };
   }
-  if (!input.language || typeof input.language !== "string") {
-    throw { statusCode: 400, message: "language is required." };
-  }
-  if (!input.formality || !["formal", "informal"].includes(input.formality)) {
-    throw { statusCode: 400, message: "formality must be formal or informal." };
-  }
+
+  const language = asString(source.language) || "English";
 
   return {
-    query: input.query.trim(),
-    businessContext: input.businessContext.trim(),
-    language: input.language.trim(),
-    formality: input.formality as Formality
+    taskType: parseTaskType(source.taskType),
+    query,
+    context,
+    language,
+    formality: parseFormality(source.formality)
   };
 }
 
-async function runBusinessAgent(input: BusinessInput): Promise<BusinessResult> {
-  const systemContext = [
-    "You are a senior business operations assistant.",
-    `Always respond in ${input.language}.`,
-    `Use ${input.formality} tone.`,
-    "Give practical, concise, and actionable guidance based on provided context."
-  ].join("\n");
+function getSystemPrompt(taskType: TaskType, language: string, formality: "formal" | "informal"): string {
+  const baseInstructions = [
+    `Always respond in ${language}.`,
+    `Use a ${formality} tone.`,
+    "Be concise, practical, and action-oriented.",
+    "Avoid guaranteed outcomes."
+  ];
 
-  const prompt = [
-    `Business context: ${input.businessContext}`,
-    `User query: ${input.query}`
-  ].join("\n");
+  if (taskType === "strategy") {
+    return [
+      "You are an expert business strategist.",
+      "Focus on market positioning, competitive edge, and execution roadmap.",
+      ...baseInstructions
+    ].join("\n");
+  }
 
-  const response = await callGemini(prompt, systemContext);
-  return { response };
+  if (taskType === "analysis") {
+    return [
+      "You are a data-driven business analyst.",
+      "Focus on metrics, assumptions, scenario outcomes, and decision trade-offs.",
+      ...baseInstructions
+    ].join("\n");
+  }
+
+  if (taskType === "marketing") {
+    return [
+      "You are a growth marketing advisor.",
+      "Focus on channels, audience segmentation, messaging, and conversion optimization.",
+      ...baseInstructions
+    ].join("\n");
+  }
+
+  return [
+    "You are a business advisor.",
+    "Help with practical planning across strategy, operations, and growth.",
+    ...baseInstructions
+  ].join("\n");
+}
+
+function estimateConfidence(result: string, taskType: TaskType): number {
+  const lengthSignal = Math.min(1, result.length / 700);
+  const keywordBoosts: Record<TaskType, string[]> = {
+    strategy: ["position", "roadmap", "priorit", "moat", "market"],
+    analysis: ["metric", "scenario", "assumption", "cost", "roi"],
+    marketing: ["channel", "campaign", "conversion", "audience", "funnel"],
+    general: ["plan", "action", "priority", "risk", "timeline"]
+  };
+
+  const lowered = result.toLowerCase();
+  const matches = keywordBoosts[taskType].filter((word) => lowered.includes(word)).length;
+  const keywordSignal = Math.min(1, matches / 4);
+  const score = 0.5 + lengthSignal * 0.25 + keywordSignal * 0.25;
+  return Number(Math.max(0.5, Math.min(0.99, score)).toFixed(2));
 }
 
 export async function POST(req: Request) {
+  console.log("[BUSINESS] Received request");
+
   try {
     const body = await req.json();
-    const input = parseInput(body);
-    const result = await runBusinessAgent(input);
-    return NextResponse.json(result, { status: 200 });
+    const config = parseBody(body);
+    const systemPrompt = getSystemPrompt(config.taskType, config.language, config.formality);
+
+    const userPrompt = [
+      `Business context: ${config.context}`,
+      `Task type: ${config.taskType}`,
+      `User request: ${config.query}`,
+      "Response format: short answer, then 3-5 numbered action steps."
+    ].join("\n");
+
+    const result = await callGemini(userPrompt, systemPrompt);
+    const response: BusinessResponse = {
+      result,
+      metadata: {
+        taskType: config.taskType,
+        confidence: estimateConfidence(result, config.taskType),
+        generatedAt: new Date().toISOString()
+      }
+    };
+
+    return NextResponse.json(response, { status: 200 });
   } catch (error: unknown) {
     if (error instanceof SyntaxError) {
-      return NextResponse.json(
-        {
-          error: toNaturalLanguageError(400, "Malformed JSON body.", "Business agent execution failed.")
-        },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Malformed JSON body." }, { status: 400 });
     }
-    const mapped = error as RouteError;
-    const status = mapped.statusCode && mapped.statusCode >= 400 ? mapped.statusCode : 500;
-    const errorMessage = toNaturalLanguageError(status, mapped.message, "Business agent execution failed.");
-    return NextResponse.json(
-      {
-        error: errorMessage
-      },
-      { status }
-    );
+
+    const mapped = error as { statusCode?: number; message?: string };
+    const statusCode = mapped.statusCode && mapped.statusCode >= 400 ? mapped.statusCode : 500;
+    const message = mapped.message || "Business agent execution failed.";
+    console.error(`[BUSINESS] Error: ${message}`);
+    return NextResponse.json({ error: message }, { status: statusCode });
   }
 }

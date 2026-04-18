@@ -30,12 +30,33 @@ const TYPE_LABEL_MAP: Record<string, string> = {
   business: "BUSINESS"
 };
 
+const TYPE_DEFAULT_DESCRIPTION_MAP: Record<string, string> = {
+  trading: "Monitors price thresholds and simulates trading decisions.",
+  farming: "Tracks LP APY and recommends when to compound rewards.",
+  scheduling: "Schedules recurring HLUSD transfers on selected cadence.",
+  rebalancing: "Monitors allocation drift and recommends portfolio rebalancing actions.",
+  content: "Generates contextual response options with tone control.",
+  business: "Answers business questions, drafts content, and provides practical guidance."
+};
+
+const TYPE_DESCRIPTION_MISMATCH_PATTERNS: Record<string, RegExp[]> = {
+  business: [/\bportfolio\b/i, /\brebalanc/i, /allocation\s+drift/i, /drift\s+tolerance/i],
+  rebalancing: [/\bbusiness assistant\b/i, /\bdraft\s+email/i, /customer\s+query/i]
+};
+
 const FIELD_OPTIONS_MAP: Record<string, string[]> = {
   tone: ["professional", "casual", "aggressive"],
   formality: ["formal", "informal"],
   frequency: ["hourly", "daily", "weekly", "monthly"],
   language: ["English"]
 };
+
+const HIDDEN_AGENT_NAME_PATTERNS: RegExp[] = [
+  /pet\s*&?\s*baby\s*name\s*genie/i,
+  /baby\s*&?\s*pet\s*name\s*(?:genie|suggester)/i,
+  /\bname\s*suggest(?:ion|ions|er|ers)?\b/i,
+  /\bname\s*genie\b/i
+];
 
 function prettifyKey(rawKey: string): string {
   return rawKey
@@ -104,6 +125,32 @@ export function getAgentImage(agentType: string): string {
 
 export function toAgentTypeLabel(agentType: string): string {
   return TYPE_LABEL_MAP[normalizeType(agentType)] || normalizeType(agentType).toUpperCase();
+}
+
+export function normalizeAgentDescription(agentType: string, description: string): string {
+  const normalizedType = normalizeType(agentType);
+  const trimmed = description.trim();
+  const fallback =
+    TYPE_DEFAULT_DESCRIPTION_MAP[normalizedType] || "AI agent that executes configured automated tasks.";
+
+  if (!trimmed) {
+    return fallback;
+  }
+
+  const mismatchPatterns = TYPE_DESCRIPTION_MISMATCH_PATTERNS[normalizedType] || [];
+  if (mismatchPatterns.some((pattern) => pattern.test(trimmed))) {
+    return fallback;
+  }
+
+  return trimmed;
+}
+
+export function isHiddenAgentName(name: string): boolean {
+  if (!name || !name.trim()) {
+    return false;
+  }
+
+  return HIDDEN_AGENT_NAME_PATTERNS.some((pattern) => pattern.test(name));
 }
 
 export function parseConfigSchema(rawSchema: string): ConfigField[] {

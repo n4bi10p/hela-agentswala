@@ -1,175 +1,214 @@
+import { randomUUID } from "node:crypto";
+import { isAddress } from "ethers";
 import { NextResponse } from "next/server";
+import { cancelJob, getJob, getJobStatus, scheduleAgent } from "@/lib/cronManager";
 
-type ScheduleFrequency = "hourly" | "daily" | "weekly" | "monthly";
+type ScheduleFrequency = "minutely" | "hourly" | "daily" | "weekly" | "monthly";
+type SchedulingAction = "schedule" | "status" | "cancel";
 
-type SchedulingInput = {
+type ScheduleConfig = {
+  userAddress: string;
   recipient: string;
   amount: number;
+  token: string;
   frequency: ScheduleFrequency;
-  startDate: string;
 };
 
-type SchedulingResult = {
-  nextExecution: string;
-  confirmation: string;
-  status: "scheduled";
-};
+type RequestBody = {
+  action?: string;
+  jobId?: string;
+  config?: Partial<ScheduleConfig>;
+} & Partial<ScheduleConfig>;
 
-type RouteError = {
-  statusCode?: number;
-  message?: string;
-};
-
-function humanizeFieldName(field: string): string {
-  const withoutPrefix = field.replace(/^payload\./, "");
-  return withoutPrefix
-    .replace(/\./g, " ")
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .toLowerCase();
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
-function toNaturalLanguageError(status: number, rawMessage: string | undefined, serverFallback: string): string {
-  if (status >= 500) {
-    return serverFallback;
+function asString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
   }
-
-  const message = (rawMessage || "").trim();
-  if (!message) {
-    return "We could not understand the request. Please check your input and try again.";
-  }
-
-  if (message === "Malformed JSON body.") {
-    return "The request body is not valid JSON. Please fix the JSON format and try again.";
-  }
-  if (message === "Request body must be a JSON object.") {
-    return "Please send a JSON object in the request body.";
-  }
-  if (message === "payload must be a JSON object.") {
-    return "Please send payload as a JSON object.";
-  }
-  if (message === "agentType is invalid.") {
-    return "The selected agent type is not supported. Use trading, farming, scheduling, rebalancing, content, or business.";
-  }
-
-  const requiredMatch = message.match(/^(.+) is required\.$/);
-  if (requiredMatch) {
-    return `Please provide ${humanizeFieldName(requiredMatch[1])}.`;
-  }
-
-  const validNumberMatch = message.match(/^(.+) must be a valid number\.$/);
-  if (validNumberMatch) {
-    return `Please provide a valid number for ${humanizeFieldName(validNumberMatch[1])}.`;
-  }
-
-  const positiveNumberMatch = message.match(/^(.+) must be a number greater than 0\.$/);
-  if (positiveNumberMatch) {
-    return `Please provide a number greater than 0 for ${humanizeFieldName(positiveNumberMatch[1])}.`;
-  }
-
-  const nonNegativeNumberMatch = message.match(/^(.+) must be a non-negative number\.$/);
-  if (nonNegativeNumberMatch) {
-    return `Please provide a non-negative number for ${humanizeFieldName(nonNegativeNumberMatch[1])}.`;
-  }
-
-  const oneOfMatch = message.match(/^(.+) must be one of (.+)\.$/);
-  if (oneOfMatch) {
-    return `Please choose ${humanizeFieldName(oneOfMatch[1])} from: ${oneOfMatch[2]}.`;
-  }
-
-  if (message === "startDate must be a valid ISO date string.") {
-    return "Please provide start date in valid ISO format, for example 2026-04-18T00:00:00.000Z.";
-  }
-
-  return "Please review your request and try again.";
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
-function isValidNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
+function asFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
-function addInterval(date: Date, frequency: ScheduleFrequency): Date {
-  const next = new Date(date);
-  if (frequency === "hourly") {
-    next.setHours(next.getHours() + 1);
-  } else if (frequency === "daily") {
-    next.setDate(next.getDate() + 1);
-  } else if (frequency === "weekly") {
-    next.setDate(next.getDate() + 7);
-  } else {
-    next.setMonth(next.getMonth() + 1);
+function parseAction(raw: unknown): SchedulingAction {
+  const action = asString(raw)?.toLowerCase();
+  if (action === "status" || action === "cancel" || action === "schedule") {
+    return action;
   }
-  return next;
+  return "schedule";
 }
 
-function parseInput(body: unknown): SchedulingInput {
-  if (!body || typeof body !== "object") {
-    throw { statusCode: 400, message: "Request body must be a JSON object." };
+function parseFrequency(raw: unknown): ScheduleFrequency {
+  const frequency = asString(raw)?.toLowerCase();
+  if (
+    frequency === "minutely" ||
+    frequency === "hourly" ||
+    frequency === "daily" ||
+    frequency === "weekly" ||
+    frequency === "monthly"
+  ) {
+    return frequency;
+  }
+  return "hourly";
+}
+
+function parseScheduleConfig(body: RequestBody): ScheduleConfig {
+  const source = isRecord(body.config) ? body.config : body;
+
+  const recipient = asString(source.recipient);
+  if (!recipient) {
+    throw { statusCode: 400, message: "config.recipient is required." };
   }
 
-  const input = body as Partial<SchedulingInput>;
-  if (!input.recipient || typeof input.recipient !== "string") {
-    throw { statusCode: 400, message: "recipient is required." };
+  const amount = asFiniteNumber(source.amount);
+  if (amount === null || amount <= 0) {
+    throw { statusCode: 400, message: "config.amount must be a number greater than 0." };
   }
-  if (!isValidNumber(input.amount) || input.amount <= 0) {
-    throw { statusCode: 400, message: "amount must be a number greater than 0." };
-  }
-  if (!input.frequency || !["hourly", "daily", "weekly", "monthly"].includes(input.frequency)) {
-    throw { statusCode: 400, message: "frequency must be one of hourly, daily, weekly, monthly." };
-  }
-  if (!input.startDate || typeof input.startDate !== "string") {
-    throw { statusCode: 400, message: "startDate is required." };
+
+  const token = asString(source.token) || "ETH";
+  const frequency = parseFrequency(source.frequency);
+
+  const rawUserAddress = asString(source.userAddress);
+  if (rawUserAddress && !isAddress(rawUserAddress)) {
+    throw { statusCode: 400, message: "config.userAddress must be a valid wallet address." };
   }
 
   return {
-    recipient: input.recipient.trim(),
-    amount: input.amount,
-    frequency: input.frequency as ScheduleFrequency,
-    startDate: input.startDate
+    userAddress: rawUserAddress || "0x0000000000000000000000000000000000000000",
+    recipient,
+    amount,
+    token,
+    frequency
   };
 }
 
-function runSchedulingAgent(input: SchedulingInput): SchedulingResult {
-  const start = new Date(input.startDate);
-  if (Number.isNaN(start.getTime())) {
-    throw { statusCode: 400, message: "startDate must be a valid ISO date string." };
+async function handleSchedule(body: RequestBody) {
+  const config = parseScheduleConfig(body);
+  const jobId = `schedule-${randomUUID()}`;
+
+  console.log(`[SCHEDULING] Creating job ${jobId}`);
+
+  scheduleAgent(
+    jobId,
+    "scheduling",
+    config.userAddress,
+    {
+      recipient: config.recipient,
+      amount: config.amount,
+      token: config.token
+    },
+    config.frequency,
+    async (runtimeConfig) => {
+      const recipient = asString(runtimeConfig.recipient) || config.recipient;
+      const token = asString(runtimeConfig.token) || config.token;
+      const amount = asFiniteNumber(runtimeConfig.amount) ?? config.amount;
+      const result = `Scheduled transfer simulation: ${amount} ${token} to ${recipient}`;
+      console.log(`[SCHEDULING] [JOB ${jobId}] ${result}`);
+      return { result };
+    }
+  );
+
+  const status = getJobStatus(jobId);
+  return NextResponse.json(
+    {
+      jobId,
+      nextRun: status?.nextRun ?? null,
+      status: status?.isActive ? "active" : "inactive",
+      message: `Payment schedule created: ${config.amount} ${config.token} to ${config.recipient} (${config.frequency}).`
+    },
+    { status: 200 }
+  );
+}
+
+function handleStatus(body: RequestBody) {
+  const jobId = asString(body.jobId);
+  if (!jobId) {
+    throw { statusCode: 400, message: "jobId is required for status action." };
   }
 
-  const now = new Date();
-  let nextExecution = new Date(start);
-  while (nextExecution <= now) {
-    nextExecution = addInterval(nextExecution, input.frequency);
+  const job = getJob(jobId);
+  if (!job) {
+    return NextResponse.json(
+      {
+        jobId,
+        nextRun: null,
+        status: "not_found",
+        message: "No schedule found for the provided jobId."
+      },
+      { status: 404 }
+    );
   }
 
-  return {
-    nextExecution: nextExecution.toISOString(),
-    confirmation: `Scheduled ${input.amount} to ${input.recipient} on a ${input.frequency} cadence.`,
-    status: "scheduled"
-  };
+  const status = getJobStatus(jobId);
+
+  return NextResponse.json(
+    {
+      jobId,
+      nextRun: status.nextRun,
+      status: status.isActive ? "active" : "inactive",
+      message: "Schedule status retrieved successfully."
+    },
+    { status: 200 }
+  );
+}
+
+function handleCancel(body: RequestBody) {
+  const jobId = asString(body.jobId);
+  if (!jobId) {
+    throw { statusCode: 400, message: "jobId is required for cancel action." };
+  }
+
+  const cancelled = cancelJob(jobId);
+  return NextResponse.json(
+    {
+      jobId,
+      nextRun: null,
+      status: cancelled ? "cancelled" : "not_found",
+      message: cancelled ? "Schedule cancelled successfully." : "No schedule found for the provided jobId."
+    },
+    { status: cancelled ? 200 : 404 }
+  );
 }
 
 export async function POST(req: Request) {
+  console.log("[SCHEDULING] Received request");
+
   try {
-    const body = await req.json();
-    const input = parseInput(body);
-    const result = runSchedulingAgent(input);
-    return NextResponse.json(result, { status: 200 });
+    const body = (await req.json()) as RequestBody;
+    if (!isRecord(body)) {
+      throw { statusCode: 400, message: "Request body must be a JSON object." };
+    }
+
+    const action = parseAction(body.action);
+    if (action === "schedule") {
+      return handleSchedule(body);
+    }
+    if (action === "status") {
+      return handleStatus(body);
+    }
+    return handleCancel(body);
   } catch (error: unknown) {
     if (error instanceof SyntaxError) {
-      return NextResponse.json(
-        {
-          error: toNaturalLanguageError(400, "Malformed JSON body.", "Scheduling agent execution failed.")
-        },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Malformed JSON body." }, { status: 400 });
     }
-    const mapped = error as RouteError;
-    const status = mapped.statusCode && mapped.statusCode >= 400 ? mapped.statusCode : 500;
-    const errorMessage = toNaturalLanguageError(status, mapped.message, "Scheduling agent execution failed.");
-    return NextResponse.json(
-      {
-        error: errorMessage
-      },
-      { status }
-    );
+
+    const mapped = error as { statusCode?: number; message?: string };
+    const statusCode = mapped.statusCode && mapped.statusCode >= 400 ? mapped.statusCode : 500;
+    const message = mapped.message || "Scheduling agent execution failed.";
+    console.error(`[SCHEDULING] Error: ${message}`);
+    return NextResponse.json({ error: message }, { status: statusCode });
   }
 }

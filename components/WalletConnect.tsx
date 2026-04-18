@@ -5,107 +5,69 @@ import {
   clearConnectedAccount,
   connectWallet,
   ensureHeLaNetwork,
-  getConnectedAccount,
-  getPersistedConnectedAccount,
-  persistConnectedAccount
+  getCurrentAccount
 } from "@/lib/wallet";
 
-function broadcastWalletChange(address: string | null) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.dispatchEvent(
-    new CustomEvent("trovia:wallet-changed", {
-      detail: { address }
-    })
-  );
-}
-
 export function WalletConnect() {
+  const [isConnected, setIsConnected] = useState(false);
   const [address, setAddress] = useState<string | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
 
   useEffect(() => {
-    async function syncAccount() {
+    let mounted = true;
+
+    async function hydrateAccount() {
       try {
-        const account = await getConnectedAccount();
-        setAddress(account);
+        const currentAccount = await getCurrentAccount();
+        if (mounted && currentAccount) {
+          setAddress(currentAccount);
+          setIsConnected(true);
+        }
       } catch {
-        const stored = getPersistedConnectedAccount();
-        setAddress(stored);
+        // Ignore hydration failures until user clicks connect.
       }
     }
 
-    syncAccount();
-
-    const handleWalletChange = async () => {
-      await syncAccount();
-    };
-
-    const handleAccountsChanged = (accounts: string[]) => {
-      const persisted = getPersistedConnectedAccount();
-      const nextAddress = accounts[0] || null;
-
-      if (!nextAddress) {
-        clearConnectedAccount();
-        setAddress(null);
-        broadcastWalletChange(null);
-        return;
-      }
-
-      if (!persisted) {
-        setAddress(null);
-        broadcastWalletChange(null);
-        return;
-      }
-
-      persistConnectedAccount(nextAddress);
-      setAddress(nextAddress);
-      broadcastWalletChange(nextAddress);
-    };
-
-    window.addEventListener("trovia:wallet-changed", handleWalletChange as EventListener);
-    window.ethereum?.on?.("accountsChanged", handleAccountsChanged);
+    hydrateAccount();
 
     return () => {
-      window.removeEventListener("trovia:wallet-changed", handleWalletChange as EventListener);
-      window.ethereum?.removeListener?.("accountsChanged", handleAccountsChanged);
+      mounted = false;
     };
   }, []);
 
   const handleConnect = async () => {
+    setIsConnecting(true);
     try {
+      const account = await connectWallet();
       await ensureHeLaNetwork();
-      const nextAddress = await connectWallet();
-      setAddress(nextAddress);
-      persistConnectedAccount(nextAddress);
-      broadcastWalletChange(nextAddress);
+
+      setAddress(account);
+      setIsConnected(true);
     } catch (error) {
       console.error("Failed to connect wallet:", error);
       alert(error instanceof Error ? error.message : "Failed to connect wallet");
+    } finally {
+      setIsConnecting(false);
     }
   };
 
   const handleDisconnect = () => {
-    if (typeof window !== "undefined") {
-      const confirmed = window.confirm("Do you really want to disconnect this wallet from Trovia?");
-      if (!confirmed) {
-        return;
-      }
-      clearConnectedAccount();
-    }
+    clearConnectedAccount();
+    setIsConnected(false);
     setAddress(null);
-    broadcastWalletChange(null);
   };
 
   return (
     <button
-      onClick={address ? handleDisconnect : handleConnect}
-      className="bracket-btn border border-white/20 px-4 py-2 font-mono text-xs transition-colors duration-150 hover:bg-white hover:text-black"
+      onClick={isConnected ? handleDisconnect : handleConnect}
+      disabled={isConnecting}
+      className="font-mono text-xs hover:bg-white hover:text-black transition-colors duration-150 px-4 py-2 border border-white/20 bracket-btn"
     >
-      {address
+      {isConnecting
+        ? "CONNECTING..."
+        : isConnected && address
         ? `${address.slice(0, 6)}...${address.slice(-4)}`
-        : "CONNECT WALLET"}
+        : "CONNECT METAMASK"}
     </button>
   );
 }
