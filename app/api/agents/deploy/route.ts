@@ -182,6 +182,7 @@ export async function POST(req: Request) {
     const { rpcUrl, privateKey } = ensureServerEnv();
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const signer = new ethers.Wallet(privateKey, provider);
+    const agentWallet = ethers.Wallet.createRandom();
 
     console.log("[DEPLOY] Step 3: registering agent on-chain");
     const registryReadContract = await getRegistryContract(false);
@@ -200,12 +201,20 @@ export async function POST(req: Request) {
     }
 
     console.log("[DEPLOY] Step 4: storing deployed agent in memory store");
-    storeAgent(agentId, agent, executionCode, developerAddress);
+    storeAgent(
+      agentId,
+      agent,
+      executionCode,
+      developerAddress,
+      agentWallet.address,
+      agentWallet.privateKey
+    );
 
     console.log("[DEPLOY] Deployment completed");
     return NextResponse.json(
       {
         agentId,
+        agentWalletAddress: agentWallet.address,
         txHash: receipt.hash,
         explorerUrl: `https://testnet-explorer.helachain.com/tx/${receipt.hash}`,
         marketplaceUrl: `/agent/${agentId}`,

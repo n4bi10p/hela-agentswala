@@ -15,6 +15,7 @@
     "deploy:hela": "hardhat run scripts/deploy.ts --network helaTestnet",
     "seed:hela": "hardhat run scripts/seed.ts --network helaTestnet",
     "activate:hela": "hardhat run scripts/activateDemo.ts --network helaTestnet",
+    "automation:run": "ts-node scripts/automationWorker.ts",
     "demo:check": "hardhat run scripts/demoCheck.ts --network helaTestnet",
     "verify:hela": "hardhat run scripts/verify.ts --network helaTestnet"
   },

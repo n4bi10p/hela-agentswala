@@ -30,12 +30,48 @@ export interface StoredAgent {
   deployedAt: string;
   developerAddress: string;
   agentId: string;
+  agentWalletAddress: string;
+  agentWalletPrivateKey: string;
+  status: "active" | "paused";
 }
 
 export interface ExecutionResult {
   success: boolean;
   result: string;
   data?: Record<string, any>;
+  txHash?: string;
+  executedAt: string;
+}
+
+export type AutomationFrequency = "hourly" | "daily" | "weekly" | "monthly";
+
+export interface AgentJobConfig {
+  [key: string]: unknown;
+}
+
+export interface AgentJob {
+  id: string;
+  agentId: string;
+  ownerAddress: string;
+  frequency: AutomationFrequency;
+  nextRunAt: string;
+  lastRunAt?: string;
+  status: "active" | "paused" | "error";
+  createdAt: string;
+  updatedAt: string;
+  userConfig: AgentJobConfig;
+  lastResult?: string;
+  lastError?: string;
+  lastExecutionTxHash?: string;
+}
+
+export interface ExecutionLogRecord {
+  id: string;
+  agentId: string;
+  ownerAddress: string;
+  jobId?: string;
+  success: boolean;
+  result: string;
   txHash?: string;
   executedAt: string;
 }

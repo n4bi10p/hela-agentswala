@@ -8,6 +8,7 @@
 
 import { callGemini } from "./gemini";
 import type { AgentObject, ExecutionResult, StoredAgent } from "../types/agent";
+import { getStoredAgent, upsertStoredAgent } from "./automationStore";
 
 const agentStore = new Map<string, StoredAgent>();
 
@@ -33,15 +34,23 @@ export function storeAgent(
   agentId: string,
   agent: AgentObject,
   executionCode: string,
-  developerAddress: string
+  developerAddress: string,
+  agentWalletAddress: string,
+  agentWalletPrivateKey: string
 ): void {
-  agentStore.set(agentId, {
+  const record: StoredAgent = {
     agent,
     executionCode,
     deployedAt: new Date().toISOString(),
     developerAddress,
-    agentId
-  });
+    agentId,
+    agentWalletAddress,
+    agentWalletPrivateKey,
+    status: "active"
+  };
+
+  agentStore.set(agentId, record);
+  upsertStoredAgent(record);
 }
 
 /**
@@ -50,7 +59,16 @@ export function storeAgent(
  * @returns Stored agent payload if found, otherwise undefined.
  */
 export function getAgent(agentId: string): StoredAgent | undefined {
-  return agentStore.get(agentId);
+  const inMemory = agentStore.get(agentId);
+  if (inMemory) {
+    return inMemory;
+  }
+
+  const stored = getStoredAgent(agentId);
+  if (stored) {
+    agentStore.set(agentId, stored);
+  }
+  return stored;
 }
 
 /**

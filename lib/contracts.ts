@@ -1,4 +1,4 @@
-import { BrowserProvider, Contract, JsonRpcProvider, parseUnits } from "ethers";
+import { BrowserProvider, Contract, JsonRpcProvider, formatUnits, parseUnits } from "ethers";
 import { ChainIntegrationError, normalizeChainError } from "./chainErrors";
 
 export type AgentType =
@@ -64,6 +64,11 @@ const AGENT_ESCROW_ABI = [
 const AGENT_EXECUTOR_ABI = [
   "function logExecution(uint256 agentId, address user, string action, string result)",
   "event ExecutionLogged(uint256 indexed agentId, address indexed user, string action, string result, uint256 timestamp)"
+];
+
+const ERC20_ABI = [
+  "function balanceOf(address account) view returns (uint256)",
+  "function decimals() view returns (uint8)"
 ];
 
 const getRpcUrl = () =>
@@ -269,6 +274,21 @@ export async function logExecution(
     return toTxResult(receipt);
   } catch (error) {
     throw normalizeChainError(error, "Failed to log execution");
+  }
+}
+
+export async function fetchHLUSDBalanceForAddress(address: string): Promise<string> {
+  try {
+    const tokenAddress = process.env.NEXT_PUBLIC_HLUSD_ADDRESS;
+    if (!tokenAddress) {
+      throw new ChainIntegrationError("missing_env", "Missing NEXT_PUBLIC_HLUSD_ADDRESS");
+    }
+
+    const token = new Contract(tokenAddress, ERC20_ABI, getReadProvider());
+    const [balance, decimals] = await Promise.all([token.balanceOf(address), token.decimals()]);
+    return formatUnits(balance, Number(decimals));
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to fetch HLUSD balance for address");
   }
 }
 
