@@ -67,14 +67,14 @@ Deliverable:
 - Hardened contracts with explicit revert behavior.
 
 ## Phase 3: Testing (Critical)
-Status: TODO
+Status: COMPLETE
 
-- [ ] Add unit tests for `AgentRegistry` success + revert paths.
-- [ ] Add unit tests for `AgentEscrow` success + revert paths.
-- [ ] Add unit tests for `AgentExecutor` success + guard behavior.
-- [ ] Add integration test:
+- [x] Add unit tests for `AgentRegistry` success + revert paths.
+- [x] Add unit tests for `AgentEscrow` success + revert paths.
+- [x] Add unit tests for `AgentExecutor` success + guard behavior.
+- [x] Add integration test:
   - publish agent -> approve HLUSD -> activate -> verify payout -> verify activation event.
-- [ ] Ensure tests run green locally before every deployment.
+- [x] Ensure tests run green locally before every deployment.
 
 Deliverable:
 - Repeatable confidence via test suite.
