@@ -1,16 +1,34 @@
 import { ethers } from "hardhat";
 import dotenv from "dotenv";
+import fs from "fs";
+import path from "path";
+import { isAddress } from "ethers";
+import { network } from "hardhat";
 
 dotenv.config();
 
-async function main() {
-  const hlusdAddress = process.env.HLUSD_ADDRESS;
-  if (!hlusdAddress) {
-    throw new Error("HLUSD_ADDRESS is required in .env");
+function requireAddress(name: string, value: string | undefined): string {
+  if (!value) {
+    throw new Error(`${name} is required in .env`);
   }
+  if (!isAddress(value)) {
+    throw new Error(`${name} must be a valid EVM address`);
+  }
+  return value;
+}
+
+async function main() {
+  const hlusdAddress = requireAddress("HLUSD_ADDRESS", process.env.HLUSD_ADDRESS);
+  const explorerUrl = process.env.HELA_EXPLORER_URL || "";
 
   const [deployer] = await ethers.getSigners();
-  console.log("Deploying with account:", deployer.address);
+  const chain = await ethers.provider.getNetwork();
+
+  console.log("Deploying contracts...");
+  console.log("Network:", network.name);
+  console.log("Chain ID:", chain.chainId.toString());
+  console.log("Deployer:", deployer.address);
+  console.log("HLUSD:", hlusdAddress);
 
   const registryFactory = await ethers.getContractFactory("AgentRegistry");
   const registry = await registryFactory.deploy();
@@ -24,9 +42,47 @@ async function main() {
   const executor = await executorFactory.deploy();
   await executor.waitForDeployment();
 
-  console.log("AgentRegistry:", await registry.getAddress());
-  console.log("AgentEscrow:", await escrow.getAddress());
-  console.log("AgentExecutor:", await executor.getAddress());
+  const deployment = {
+    network: network.name,
+    chainId: chain.chainId.toString(),
+    timestamp: new Date().toISOString(),
+    deployer: deployer.address,
+    hlusdAddress,
+    contracts: {
+      agentRegistry: await registry.getAddress(),
+      agentEscrow: await escrow.getAddress(),
+      agentExecutor: await executor.getAddress()
+    }
+  };
+
+  const deploymentsDir = path.join(process.cwd(), "deployments");
+  fs.mkdirSync(deploymentsDir, { recursive: true });
+
+  const networkFile = path.join(deploymentsDir, `${network.name}.json`);
+  fs.writeFileSync(networkFile, JSON.stringify(deployment, null, 2));
+
+  const latestFile = path.join(deploymentsDir, "latest.json");
+  fs.writeFileSync(latestFile, JSON.stringify(deployment, null, 2));
+
+  console.log("\nDeployment complete");
+  console.log("AgentRegistry:", deployment.contracts.agentRegistry);
+  console.log("AgentEscrow:", deployment.contracts.agentEscrow);
+  console.log("AgentExecutor:", deployment.contracts.agentExecutor);
+
+  if (explorerUrl) {
+    const cleanExplorer = explorerUrl.replace(/\/$/, "");
+    console.log("\nExplorer links:");
+    console.log(`Registry: ${cleanExplorer}/address/${deployment.contracts.agentRegistry}`);
+    console.log(`Escrow: ${cleanExplorer}/address/${deployment.contracts.agentEscrow}`);
+    console.log(`Executor: ${cleanExplorer}/address/${deployment.contracts.agentExecutor}`);
+  }
+
+  console.log("\nCopy into .env.local:");
+  console.log(`NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS=${deployment.contracts.agentRegistry}`);
+  console.log(`NEXT_PUBLIC_AGENT_ESCROW_ADDRESS=${deployment.contracts.agentEscrow}`);
+  console.log(`NEXT_PUBLIC_AGENT_EXECUTOR_ADDRESS=${deployment.contracts.agentExecutor}`);
+
+  console.log(`\nSaved deployment artifact: ${networkFile}`);
 }
 
 main().catch((error) => {

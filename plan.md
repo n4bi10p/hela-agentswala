@@ -82,8 +82,8 @@ Deliverable:
 ## Phase 4: Deployment + Verification
 Status: IN PROGRESS
 
-- [ ] Keep `scripts/deploy.ts` environment-driven.
-- [ ] Add output summary format for quick copy to `.env.local`.
+- [x] Keep `scripts/deploy.ts` environment-driven.
+- [x] Add output summary format for quick copy to `.env.local`.
 - [ ] Deploy contracts to HeLa testnet.
 - [ ] Verify all contracts on explorer.
 - [ ] Save addresses and verification links in README/demo notes.
