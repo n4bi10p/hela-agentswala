@@ -3,10 +3,13 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { TopNavBar } from "@/components/TopNavBar";
-import { publishAgent, type AgentType } from "@/lib/contracts";
-import { connectWallet, ensureHeLaNetwork, persistConnectedAccount } from "@/lib/wallet";
+import { type AgentType } from "@/lib/contracts";
+import { connectWallet, ensureHeLaNetwork, persistConnectedAccount, signMessage } from "@/lib/wallet";
 
 const AGENT_TYPES = ["trading", "farming", "scheduling", "rebalancing", "content", "business"] as const;
+const PUBLISH_MODES = ["guided", "technical"] as const;
+
+type PublishMode = (typeof PUBLISH_MODES)[number];
 
 type PublishReviewResult = {
   verdict: "approve" | "review" | "block";
@@ -20,6 +23,46 @@ type PublishReviewResult = {
   recommendedChanges: string[];
   userSafetyNotes: string[];
   source: "heuristic" | "gemini" | "gemini+heuristic";
+};
+
+type GeneratedField = {
+  key: string;
+  label: string;
+  type: "text" | "number" | "select" | "address";
+  required: boolean;
+  options?: string[];
+  placeholder?: string;
+};
+
+type GeneratedAgentPayload = {
+  name: string;
+  description: string;
+  agentType: AgentType;
+  priceHLUSD: number;
+  configSchema: { fields: GeneratedField[] };
+  executionLogic: string;
+  geminiPrompt: string;
+  tags: string[];
+  estimatedRuntime: string;
+};
+
+type GenerateResponse = {
+  agent: GeneratedAgentPayload;
+  executionCode: string;
+  ready: boolean;
+};
+
+type GeneratedDraft = {
+  agent: GeneratedAgentPayload;
+  executionCode: string;
+};
+
+type DeployResponse = {
+  agentId: string;
+  txHash: string;
+  explorerUrl?: string;
+  marketplaceUrl?: string;
+  deployed: boolean;
 };
 
 function defaultSchemaFor(agentType: string) {
@@ -38,7 +81,87 @@ function defaultSchemaFor(agentType: string) {
   return JSON.stringify({ notes: "text" }, null, 2);
 }
 
+function toPublishConfigSchema(fields: GeneratedField[]) {
+  return JSON.stringify(
+    fields.map((field) => ({
+      key: field.key,
+      label: field.label,
+      type: field.type,
+      placeholder: field.placeholder || `Enter ${field.label.toLowerCase()}`,
+      options: field.options
+    })),
+    null,
+    2
+  );
+}
+
+function toNaturalWorkflowSummary(agent: GeneratedAgentPayload) {
+  return [
+    `Agent goal: ${agent.executionLogic}`,
+    `Runtime profile: ${agent.estimatedRuntime}`,
+    `Gemini behavior prompt: ${agent.geminiPrompt}`,
+    `Tags: ${agent.tags.join(", ")}`
+  ].join("\n");
+}
+
+function parseSchemaForDeploy(schemaRaw: string): { fields: GeneratedField[] } {
+  const parsed = JSON.parse(schemaRaw) as unknown;
+
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error("Configuration schema must be a non-empty JSON array for AI deployment mode.");
+  }
+
+  const fields: GeneratedField[] = parsed.map((item, index) => {
+    if (!item || typeof item !== "object") {
+      throw new Error(`Invalid config field at index ${index}.`);
+    }
+
+    const record = item as {
+      key?: string;
+      label?: string;
+      type?: string;
+      options?: string[];
+      placeholder?: string;
+      required?: boolean;
+    };
+
+    const key = (record.key || "").trim();
+    const label = (record.label || key).trim();
+    const rawType = (record.type || "text").trim().toLowerCase();
+
+    if (!key) {
+      throw new Error(`Config field ${index + 1} is missing key.`);
+    }
+
+    const validTypes = new Set(["text", "number", "select", "address"]);
+    if (!validTypes.has(rawType)) {
+      throw new Error(`Config field "${key}" has unsupported type "${rawType}" for AI deployment mode.`);
+    }
+
+    return {
+      key,
+      label: label || key,
+      type: rawType as GeneratedField["type"],
+      required: typeof record.required === "boolean" ? record.required : true,
+      options: Array.isArray(record.options) ? record.options : undefined,
+      placeholder: typeof record.placeholder === "string" ? record.placeholder : undefined
+    };
+  });
+
+  return { fields };
+}
+
 export default function PublishPage() {
+  const [publishMode, setPublishMode] = useState<PublishMode>("guided");
+  const [generationPrompt, setGenerationPrompt] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedDraft, setGeneratedDraft] = useState<GeneratedDraft | null>(null);
+  const [technicalExecutionCode, setTechnicalExecutionCode] = useState("");
+  const [generatedContext, setGeneratedContext] = useState<{
+    tags: string[];
+    estimatedRuntime: string;
+  } | null>(null);
+
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -61,11 +184,69 @@ export default function PublishPage() {
 
   const handleInputChange = (field: string, value: string) => {
     setReviewResult(null);
+    setError(null);
     setFormData((prev) => ({
       ...prev,
       [field]: value,
       ...(field === "agentType" && !prev.configSchema.trim() ? { configSchema: defaultSchemaFor(value) } : {})
     }));
+  };
+
+  const handleGenerateFromPrompt = async () => {
+    try {
+      if (!generationPrompt.trim()) {
+        setError("Describe your agent in plain English before generating.");
+        return;
+      }
+
+      setIsGenerating(true);
+      setError(null);
+      setReviewResult(null);
+      setStatusMessage("Generating agent draft with Gemini...");
+
+      const response = await fetch("/api/agents/generate", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          prompt: generationPrompt.trim()
+        })
+      });
+
+      const payload = (await response.json()) as GenerateResponse | { error: string };
+      if (!response.ok || "error" in payload) {
+        throw new Error("error" in payload ? payload.error : "Failed to generate agent draft.");
+      }
+
+      const generated = payload.agent;
+
+      setFormData({
+        name: generated.name,
+        description: generated.description,
+        agentType: generated.agentType,
+        price: String(generated.priceHLUSD),
+        configSchema: toPublishConfigSchema(generated.configSchema.fields),
+        workflowSummary: toNaturalWorkflowSummary(generated)
+      });
+      setGeneratedContext({
+        tags: generated.tags,
+        estimatedRuntime: generated.estimatedRuntime
+      });
+      setTechnicalExecutionCode(payload.executionCode);
+      setGeneratedDraft({
+        agent: generated,
+        executionCode: payload.executionCode
+      });
+      setStatusMessage("Agent draft generated. Review fields, run safety review, then publish.");
+    } catch (generationError) {
+      setStatusMessage(null);
+      setGeneratedDraft(null);
+      setGeneratedContext(null);
+      setError(generationError instanceof Error ? generationError.message : "Failed to generate agent draft.");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const runSafetyReview = async () => {
@@ -145,17 +326,76 @@ export default function PublishPage() {
       const connectedAccount = await connectWallet();
       persistConnectedAccount(connectedAccount);
 
-      setStatusMessage("Submitting publish transaction...");
-      const txResult = await publishAgent({
+      const parsedPrice = Number(formData.price);
+      if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+        throw new Error("Activation price must be a valid positive number.");
+      }
+
+      const executionCodeToDeploy =
+        publishMode === "guided"
+          ? generatedDraft?.executionCode || technicalExecutionCode.trim()
+          : technicalExecutionCode.trim();
+
+      if (!executionCodeToDeploy) {
+        throw new Error("Runtime execution code is required for full deployment.");
+      }
+
+      const deployBaseAgent =
+        publishMode === "guided" && generatedDraft
+          ? generatedDraft.agent
+          : {
+              name: formData.name.trim(),
+              description: formData.description.trim(),
+              agentType: formData.agentType as AgentType,
+              priceHLUSD: parsedPrice,
+              configSchema: parseSchemaForDeploy(formData.configSchema),
+              executionLogic: formData.workflowSummary.trim(),
+              geminiPrompt: formData.workflowSummary.trim(),
+              tags: ["custom", formData.agentType, "manual"],
+              estimatedRuntime: "on demand"
+            };
+
+      const deploymentAgent: GeneratedAgentPayload = {
+        ...deployBaseAgent,
         name: formData.name.trim(),
         description: formData.description.trim(),
         agentType: formData.agentType as AgentType,
-        price: formData.price,
-        configSchema: formData.configSchema
+        priceHLUSD: parsedPrice,
+        configSchema: parseSchemaForDeploy(formData.configSchema),
+        executionLogic: formData.workflowSummary.trim()
+      };
+
+      setStatusMessage("Requesting wallet signature for deployment...");
+      const signature = await signMessage(`Deploy agent: ${deploymentAgent.name}`);
+
+      setStatusMessage("Deploying agent runtime and publishing on-chain...");
+      const deployResponse = await fetch("/api/agents/deploy", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          agent: deploymentAgent,
+          executionCode: executionCodeToDeploy,
+          developerAddress: connectedAccount,
+          signature
+        })
       });
 
-      setLastTxHash(txResult.hash);
-      setStatusMessage("Agent published on-chain.");
+      const deployPayload = (await deployResponse.json()) as DeployResponse | { error?: string; details?: string };
+      if (!deployResponse.ok) {
+        throw new Error(
+          "error" in deployPayload && deployPayload.error
+            ? deployPayload.details
+              ? `${deployPayload.error}: ${deployPayload.details}`
+              : deployPayload.error
+            : "Failed to deploy AI agent."
+        );
+      }
+
+      setLastTxHash(deployPayload.txHash);
+      setStatusMessage("Agent runtime deployed and published on-chain.");
+
       setFormData({
         name: "",
         description: "",
@@ -164,7 +404,11 @@ export default function PublishPage() {
         configSchema: defaultSchemaFor("trading"),
         workflowSummary: ""
       });
+      setGeneratedDraft(null);
+      setTechnicalExecutionCode("");
+      setGeneratedContext(null);
       setReviewResult(null);
+      setGenerationPrompt("");
     } catch (publishError) {
       if (publishError instanceof SyntaxError) {
         setError("Configuration schema must be valid JSON.");
@@ -197,6 +441,58 @@ export default function PublishPage() {
               Register a new agent directly on HeLa using your connected developer wallet.
             </p>
           </div>
+
+          <div className="grid grid-cols-1 gap-3 border border-white/12 p-3 md:grid-cols-2">
+            <button
+              onClick={() => setPublishMode("guided")}
+              className={`border px-4 py-3 font-headline text-lg uppercase transition-colors ${
+                publishMode === "guided" ? "border-white bg-white text-black" : "border-white/30 text-white hover:border-white"
+              }`}
+            >
+              [ Describe with AI ]
+            </button>
+            <button
+              onClick={() => setPublishMode("technical")}
+              className={`border px-4 py-3 font-headline text-lg uppercase transition-colors ${
+                publishMode === "technical" ? "border-white bg-white text-black" : "border-white/30 text-white hover:border-white"
+              }`}
+            >
+              [ Technical JSON ]
+            </button>
+          </div>
+
+          {publishMode === "guided" && (
+            <div className="flex flex-col gap-4 border border-white/12 bg-white/5 p-4">
+              <p className="font-headline text-2xl uppercase text-white">Non-Technical Builder</p>
+              <p className="font-mono text-xs uppercase text-white/60">
+                Describe your agent in plain English and Gemini will draft its schema, price, and workflow.
+              </p>
+              <textarea
+                value={generationPrompt}
+                onChange={(event) => setGenerationPrompt(event.target.value)}
+                placeholder="Example: Build an agent that checks my product support inbox every hour, categorizes urgency, and drafts safe reply options."
+                className="bg-surface-container border border-white/20 p-3 font-body text-sm text-white placeholder-white/30 transition-colors focus:border-white focus:outline-none"
+                rows={5}
+              />
+              <button
+                onClick={handleGenerateFromPrompt}
+                disabled={isGenerating || isReviewing || isPublishing}
+                className="border border-white px-6 py-3 font-headline text-lg uppercase text-white transition-colors hover:bg-white hover:text-black disabled:opacity-50"
+              >
+                {isGenerating ? "GENERATING..." : "[ GENERATE AGENT DRAFT ↗ ]"}
+              </button>
+              {generatedContext && (
+                <div className="border border-white/10 bg-black/30 p-3">
+                  <p className="font-mono text-xs uppercase text-white/60">
+                    Runtime: {generatedContext.estimatedRuntime}
+                  </p>
+                  <p className="mt-2 font-mono text-xs uppercase text-white/60">
+                    Tags: {generatedContext.tags.join(" | ")}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="flex flex-col gap-6">
             <div className="flex flex-col gap-2">
@@ -269,10 +565,27 @@ export default function PublishPage() {
               />
             </div>
 
+            <div className="flex flex-col gap-2">
+              <label className="font-mono text-xs uppercase text-white/60">
+                Runtime Execution Code (JavaScript) *
+              </label>
+              <textarea
+                value={technicalExecutionCode}
+                onChange={(event) => setTechnicalExecutionCode(event.target.value)}
+                placeholder={
+                  publishMode === "guided"
+                    ? "Auto-filled from Gemini draft. You can still edit if needed."
+                    : "Paste async function executeAgent(config) { ... }"
+                }
+                className="bg-surface-container border border-white/20 p-3 font-mono text-xs text-white placeholder-white/30 transition-colors focus:border-white focus:outline-none"
+                rows={10}
+              />
+            </div>
+
             <div className="border border-white/10 bg-white/5 p-4">
               <p className="font-mono text-xs font-bold uppercase text-white/60">Requirements</p>
               <p className="mt-2 text-xs uppercase leading-relaxed text-white/60">
-                Wallet on HeLa, valid config schema JSON, clear workflow disclosure, and a passed AI safety review before on-chain publishing.
+                Wallet on HeLa, valid config schema JSON, runtime execution code, clear workflow disclosure, and a passed safety review before deployment.
               </p>
             </div>
 
@@ -286,7 +599,7 @@ export default function PublishPage() {
                 </div>
                 <button
                   onClick={runSafetyReview}
-                  disabled={isReviewing || isPublishing}
+                  disabled={isReviewing || isPublishing || isGenerating}
                   className="border border-white px-6 py-3 font-headline text-lg uppercase text-white transition-colors hover:bg-white hover:text-black disabled:opacity-50"
                 >
                   {isReviewing ? "REVIEWING..." : "[ RUN SAFETY REVIEW ↗ ]"}
@@ -364,7 +677,7 @@ export default function PublishPage() {
           <div className="flex flex-col gap-4 md:flex-row">
             <button
               onClick={handlePublish}
-              disabled={isPublishing || isReviewing || reviewResult?.verdict !== "approve"}
+              disabled={isPublishing || isReviewing || isGenerating || reviewResult?.verdict !== "approve"}
               className="flex-1 border border-white bg-white py-4 font-headline text-xl uppercase text-black transition-colors hover:bg-black hover:text-white disabled:opacity-50"
             >
               {isPublishing ? "PUBLISHING..." : "[ PUBLISH ↗ ]"}

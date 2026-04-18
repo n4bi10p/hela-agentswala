@@ -175,3 +175,23 @@ export async function approveHLUSD(spender: string, amount: bigint) {
     throw normalizeChainError(error, "Failed to approve HLUSD");
   }
 }
+
+export async function signMessage(message: string): Promise<string> {
+  try {
+    const ethereum = getEthereum();
+    const account = await connectWallet();
+
+    const signature = (await ethereum.request({
+      method: "personal_sign",
+      params: [message, account]
+    })) as string;
+
+    if (!signature || typeof signature !== "string") {
+      throw new ChainIntegrationError("invalid_input", "Wallet signature was not returned");
+    }
+
+    return signature;
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to sign wallet message");
+  }
+}

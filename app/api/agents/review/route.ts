@@ -69,10 +69,29 @@ const REVIEW_PATTERNS: Array<{ pattern: RegExp; title: string; detail: string; s
   }
 ];
 
+const BLOCK_TITLES = new Set([
+  "Sensitive wallet secret access",
+  "Possible wallet-draining behavior",
+  "Potentially illegal or unethical use case"
+]);
+
+type SafetyGuards = {
+  protectsSecrets: boolean;
+  deniesAutoSign: boolean;
+  deniesTransfers: boolean;
+};
+
 function clampRiskLevel(levels: RiskLevel[]): RiskLevel {
   if (levels.includes("critical")) return "critical";
   if (levels.includes("high")) return "high";
   if (levels.includes("medium")) return "medium";
+  return "low";
+}
+
+function severityToRiskLevel(severity: FindingSeverity): RiskLevel {
+  if (severity === "critical") return "critical";
+  if (severity === "high") return "high";
+  if (severity === "medium") return "medium";
   return "low";
 }
 
@@ -144,6 +163,93 @@ function buildSubmissionText(body: Required<ReviewRequestBody>) {
   ].join("\n");
 }
 
+function hasNegationContext(haystack: string, index: number, length: number): boolean {
+  const windowStart = Math.max(0, index - 80);
+  const windowEnd = Math.min(haystack.length, index + length + 30);
+  const context = haystack.slice(windowStart, windowEnd).toLowerCase();
+
+  return (
+    /\b(never|do not|does not|must not|cannot|can't|won't|will not|without)\b/.test(context) &&
+    /\b(request|ask|collect|store|sign|auto-sign|approve|transfer|move|hold|custody|use)\b/.test(context)
+  );
+}
+
+function hasActivePatternMatch(haystack: string, pattern: RegExp): boolean {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  const regex = new RegExp(pattern.source, flags);
+  let match: RegExpExecArray | null = regex.exec(haystack);
+
+  while (match) {
+    if (!hasNegationContext(haystack, match.index, match[0].length)) {
+      return true;
+    }
+    match = regex.exec(haystack);
+  }
+
+  return false;
+}
+
+function detectSafetyGuards(haystack: string): SafetyGuards {
+  const lowered = haystack.toLowerCase();
+
+  return {
+    protectsSecrets:
+      /\b(never|do not|does not|must not|will not)\b.{0,35}\b(request|ask|collect|store)\b.{0,35}\b(seed phrase|secret phrase|private key|mnemonic)\b/.test(lowered),
+    deniesAutoSign:
+      /\b(never|do not|does not|must not|will not)\b.{0,25}\b(auto-sign|sign transactions?|silent transaction)\b/.test(lowered),
+    deniesTransfers:
+      /\b(never|do not|does not|must not|will not)\b.{0,30}\b(transfer|send|move)\b.{0,20}\b(funds|tokens|assets|wallet)\b/.test(lowered) ||
+      /\b(text-only|no blockchain transactions?)\b/.test(lowered)
+  };
+}
+
+function filterContradictoryFindings(findings: ReviewFinding[], guards: SafetyGuards): ReviewFinding[] {
+  return findings.filter((finding) => {
+    const title = finding.title.toLowerCase();
+    const detail = finding.detail.toLowerCase();
+
+    if (guards.deniesAutoSign && (title.includes("transaction consent") || detail.includes("without explicit user confirmation"))) {
+      return false;
+    }
+
+    if (guards.protectsSecrets && (title.includes("wallet secret") || detail.includes("seed phrases or private keys"))) {
+      return false;
+    }
+
+    if (guards.deniesTransfers && (title.includes("wallet-draining") || detail.includes("move or seize user funds"))) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function recalculateOutcome(base: ReviewResult): ReviewResult {
+  const riskLevel = base.findings.length
+    ? clampRiskLevel(base.findings.map((finding) => severityToRiskLevel(finding.severity)))
+    : "low";
+
+  const hasBlockFinding = base.findings.some((finding) => finding.severity === "critical" && BLOCK_TITLES.has(finding.title));
+  const hasReviewLevelFinding = base.findings.some(
+    (finding) => finding.severity === "medium" || finding.severity === "high" || finding.severity === "critical"
+  );
+  const verdict: ReviewVerdict = hasBlockFinding ? "block" : hasReviewLevelFinding ? "review" : "approve";
+
+  const summary =
+    verdict === "approve"
+      ? "No strong malicious signals were detected from the submitted metadata and workflow summary."
+      : verdict === "review"
+        ? "The submission has risk signals that should be clarified before publishing."
+        : "The submission appears unsafe or clearly inappropriate for marketplace publication.";
+
+  return {
+    ...base,
+    verdict,
+    riskLevel,
+    summary
+  };
+}
+
 function heuristicReview(body: Required<ReviewRequestBody>): ReviewResult {
   const haystack = buildSubmissionText(body);
   const findings: ReviewFinding[] = [];
@@ -152,7 +258,7 @@ function heuristicReview(body: Required<ReviewRequestBody>): ReviewResult {
   let verdict: ReviewVerdict = "approve";
 
   for (const entry of BLOCK_PATTERNS) {
-    if (entry.pattern.test(haystack)) {
+    if (hasActivePatternMatch(haystack, entry.pattern)) {
       findings.push({
         severity: "critical",
         title: entry.title,
@@ -164,7 +270,7 @@ function heuristicReview(body: Required<ReviewRequestBody>): ReviewResult {
   }
 
   for (const entry of REVIEW_PATTERNS) {
-    if (entry.pattern.test(haystack)) {
+    if (hasActivePatternMatch(haystack, entry.pattern)) {
       findings.push({
         severity: entry.severity,
         title: entry.title,
@@ -194,7 +300,7 @@ function heuristicReview(body: Required<ReviewRequestBody>): ReviewResult {
     recommendedChanges.push("Keep the workflow transparent and clearly disclose any fund approvals or transfers.");
   }
 
-  return {
+  const result: ReviewResult = {
     verdict,
     riskLevel: clampRiskLevel(riskSignals),
     summary:
@@ -211,6 +317,12 @@ function heuristicReview(body: Required<ReviewRequestBody>): ReviewResult {
     ],
     source: "heuristic"
   };
+
+  const guards = detectSafetyGuards(haystack);
+  return recalculateOutcome({
+    ...result,
+    findings: filterContradictoryFindings(result.findings, guards)
+  });
 }
 
 function mergeReviewResults(heuristic: ReviewResult, gemini: ReviewResult): ReviewResult {
@@ -276,7 +388,7 @@ function validate(body: ReviewRequestBody): { ok: true; value: Required<ReviewRe
   const configSchema = typeof body.configSchema === "string" ? body.configSchema.trim() : "";
   const workflowSummary = typeof body.workflowSummary === "string" ? body.workflowSummary.trim() : "";
 
-  if (!name || !description || !agentType || !price || !configSchema) {
+  if (!name || !description || !agentType || !price || !configSchema || !workflowSummary) {
     return { ok: false, error: "name, description, agentType, price, configSchema, and workflowSummary are required." };
   }
 
@@ -309,8 +421,16 @@ export async function POST(req: Request) {
   const heuristic = heuristicReview(validated.value);
 
   try {
+    const haystack = buildSubmissionText(validated.value);
+    const guards = detectSafetyGuards(haystack);
     const gemini = await geminiReview(validated.value);
-    return NextResponse.json(mergeReviewResults(heuristic, gemini), { status: 200 });
+    const normalizedGemini = recalculateOutcome({
+      ...gemini,
+      findings: filterContradictoryFindings(gemini.findings, guards)
+    });
+
+    const merged = mergeReviewResults(heuristic, normalizedGemini);
+    return NextResponse.json(recalculateOutcome(merged), { status: 200 });
   } catch (error) {
     console.warn("[PUBLISH_REVIEW] Gemini review unavailable:", error instanceof Error ? error.message : String(error));
     return NextResponse.json(heuristic, { status: 200 });
