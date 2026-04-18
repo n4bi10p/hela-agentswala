@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "target": "es2021",
+    "rootDir": ".",
     "module": "commonjs",
     "moduleResolution": "node",
     "strict": true,
@@ -11,5 +12,5 @@
     "skipLibCheck": true,
     "types": ["node", "hardhat"]
   },
-  "include": ["hardhat.config.ts", "scripts", "test", "lib"]
+  "include": ["hardhat.config.ts", "scripts", "lib"]
 }

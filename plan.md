@@ -30,51 +30,51 @@ Deliverable:
 - Single source-of-truth env/config values shared with team.
 
 ## Phase 1: Contract Baseline Completion
-Status: IN PROGRESS
+Status: COMPLETE
 
 ### 1.1 AgentRegistry
-- [ ] Verify `publishAgent` input validation is complete.
-- [ ] Verify `getAgent` / `getAllAgents` behavior and gas safety for expected list size.
-- [ ] Verify activation toggle permission checks.
-- [ ] Ensure publish/toggle events contain fields needed by UI/indexing.
+- [x] Verify `publishAgent` input validation is complete.
+- [x] Verify `getAgent` / `getAllAgents` behavior and gas safety for expected list size.
+- [x] Verify activation toggle permission checks.
+- [x] Ensure publish/toggle events contain fields needed by UI/indexing.
 
 ### 1.2 AgentEscrow
-- [ ] Validate payment path: `transferFrom` buyer -> escrow -> developer.
-- [ ] Validate behavior for `priceHLUSD == 0` (free agent flow).
-- [ ] Validate activation record structure and retrieval needs.
-- [ ] Decide duplicate activation policy (allow multiple vs once-per-user-agent).
-- [ ] Emit complete activation event payload for dashboard feed.
+- [x] Validate payment path: `transferFrom` buyer -> escrow -> developer.
+- [x] Validate behavior for `priceHLUSD == 0` (free agent flow).
+- [x] Validate activation record structure and retrieval needs.
+- [x] Decide duplicate activation policy (allow multiple vs once-per-user-agent).
+- [x] Emit complete activation event payload for dashboard feed.
 
 ### 1.3 AgentExecutor
-- [ ] Decide caller restriction model:
+- [x] Decide caller restriction model:
   - Option A: public logging
   - Option B: restricted relayer/backend signer
-- [ ] Emit consistent execution events for on-chain auditability.
+- [x] Emit consistent execution events for on-chain auditability.
 
 Deliverable:
 - Contract set finalized for testnet deployment.
 
 ## Phase 2: Security and Failure Semantics
-Status: TODO
+Status: COMPLETE
 
-- [ ] Ensure all invalid states revert with clear messages.
-- [ ] Ensure no zero-address critical dependencies.
-- [ ] Ensure token transfer failures cannot silently pass.
-- [ ] Review potential replay/duplicate behavior for activation/execution logs.
-- [ ] Validate no accidental privileged methods are left open.
+- [x] Ensure all invalid states revert with clear messages.
+- [x] Ensure no zero-address critical dependencies.
+- [x] Ensure token transfer failures cannot silently pass.
+- [x] Review potential replay/duplicate behavior for activation/execution logs.
+- [x] Validate no accidental privileged methods are left open.
 
 Deliverable:
 - Hardened contracts with explicit revert behavior.
 
 ## Phase 3: Testing (Critical)
-Status: TODO
+Status: COMPLETE
 
-- [ ] Add unit tests for `AgentRegistry` success + revert paths.
-- [ ] Add unit tests for `AgentEscrow` success + revert paths.
-- [ ] Add unit tests for `AgentExecutor` success + guard behavior.
-- [ ] Add integration test:
+- [x] Add unit tests for `AgentRegistry` success + revert paths.
+- [x] Add unit tests for `AgentEscrow` success + revert paths.
+- [x] Add unit tests for `AgentExecutor` success + guard behavior.
+- [x] Add integration test:
   - publish agent -> approve HLUSD -> activate -> verify payout -> verify activation event.
-- [ ] Ensure tests run green locally before every deployment.
+- [x] Ensure tests run green locally before every deployment.
 
 Deliverable:
 - Repeatable confidence via test suite.
@@ -82,28 +82,38 @@ Deliverable:
 ## Phase 4: Deployment + Verification
 Status: IN PROGRESS
 
-- [ ] Keep `scripts/deploy.ts` environment-driven.
-- [ ] Add output summary format for quick copy to `.env.local`.
-- [ ] Deploy contracts to HeLa testnet.
+- [x] Keep `scripts/deploy.ts` environment-driven.
+- [x] Add output summary format for quick copy to `.env.local`.
+- [x] Deploy contracts to HeLa testnet.
 - [ ] Verify all contracts on explorer.
-- [ ] Save addresses and verification links in README/demo notes.
+- [x] Save addresses and verification links in README/demo notes.
+
+Note: Hardhat automated verification currently fails with explorer API HTML response parsing.
+Deployment addresses are confirmed live on explorer links above.
+Demo preflight currently passes after switching to deployed demo HLUSD token on testnet.
+
+Latest deployment (2026-04-18):
+- AgentRegistry: https://testnet-blockexplorer.helachain.com/address/0x539834B08c1654b598a9D0a28C883253b3C0460b
+- AgentEscrow: https://testnet-blockexplorer.helachain.com/address/0xcD15d4C76F855D367a6f3b6b3781484dE1383af8
+- AgentExecutor: https://testnet-blockexplorer.helachain.com/address/0x24072496189171977c4C6198ab0493D4D1Bf2b56
+- Demo HLUSD: https://testnet-blockexplorer.helachain.com/address/0x6fEF5d9fe6051dED5cC838feD792c36252DF12bf
 
 Deliverable:
 - Publicly verifiable deployed contracts.
 
 ## Phase 5: Frontend Integration Layer
-Status: IN PROGRESS
+Status: COMPLETE
 
 ### 5.1 `lib/contracts.ts`
-- [ ] Confirm function signatures used by Aman pages.
-- [ ] Standardize return types and transaction wait handling.
-- [ ] Add safe parsing/typing for bigint and structured agent data.
+- [x] Confirm function signatures used by Aman pages.
+- [x] Standardize return types and transaction wait handling.
+- [x] Add safe parsing/typing for bigint and structured agent data.
 
 ### 5.2 `lib/wallet.ts`
-- [ ] Ensure connect wallet flow is deterministic.
-- [ ] Ensure chain switch/add flow handles missing network cleanly.
-- [ ] Ensure HLUSD balance and approve flow is stable.
-- [ ] Add user-friendly error mapping for:
+- [x] Ensure connect wallet flow is deterministic.
+- [x] Ensure chain switch/add flow handles missing network cleanly.
+- [x] Ensure HLUSD balance and approve flow is stable.
+- [x] Add user-friendly error mapping for:
   - user rejected request
   - wrong network
   - insufficient balance/allowance
@@ -113,17 +123,22 @@ Deliverable:
 - Stable blockchain adapter layer for frontend consumption.
 
 ## Phase 6: Seed Data for Demo
-Status: TODO
+Status: COMPLETE
 
-- [ ] Create script or runbook to publish all 6 required agents.
-- [ ] Validate each agent has name/type/price/schema correctly set.
-- [ ] Ensure marketplace always has complete data set for judging.
+- [x] Create script or runbook to publish all 6 required agents.
+- [x] Validate each agent has name/type/price/schema correctly set.
+- [x] Ensure marketplace always has complete data set for judging.
+
+Latest seed run (2026-04-18):
+- Registry: `0x539834B08c1654b598a9D0a28C883253b3C0460b`
+- Published in run: 6 agents
+- Total registry count after run: 6
 
 Deliverable:
 - All six agents visible and activatable in UI.
 
 ## Phase 7: E2E Demo Rehearsal
-Status: TODO
+Status: IN PROGRESS
 
 - [ ] Connect MetaMask on HeLa.
 - [ ] Browse marketplace -> open agent details.
@@ -131,7 +146,11 @@ Status: TODO
 - [ ] Capture tx hash and explorer link.
 - [ ] Run Content Reply interaction and verify log path.
 - [ ] Validate dashboard shows activations/events.
-- [ ] Record fallback procedure if RPC/tx fails live.
+- [x] Record fallback procedure if RPC/tx fails live.
+
+Implemented rehearsal tooling:
+- `npm run demo:check` for automated preflight validation (contracts, seed data, HLUSD token contract check)
+- `DEMO_RUNBOOK.md` for live demo flow + fallback playbook
 
 Deliverable:
 - Judging-ready demo with backup paths.
@@ -148,9 +167,9 @@ Deliverable:
 ## Open Decisions (Resolve ASAP)
 - [x] Final chain ID (`666888`)
 - [x] HLUSD testnet address
-- [ ] AgentExecutor access control mode (public/restricted)
-- [ ] Duplicate activation behavior policy
-- [ ] Scheduling execution mode (fully on-chain vs backend-triggered execution)
+- [x] AgentExecutor access control mode (restricted relayer + self logging)
+- [x] Duplicate activation behavior policy (once-per-user-per-agent)
+- [x] Scheduling execution mode (backend-triggered execution with on-chain logging)
 
 ## Freeze Policy
 - 4:30 PM onward: no new blockchain features.
@@ -160,7 +179,10 @@ Deliverable:
 ```bash
 npm run compile
 npm run test
+npm run deploy:hlusd-demo
 npm run deploy:hela
+npm run seed:hela
+npm run demo:check
 ```
 
 ## Working Notes

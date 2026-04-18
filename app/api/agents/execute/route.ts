@@ -10,8 +10,10 @@ import { getExecutorContract } from "../../../../lib/contracts";
 import { getAgent, runAgent } from "../../../../lib/agentRunner";
 
 type ExecuteRequestBody = {
-  agentId?: string;
+  agentId?: string | number;
   userConfig?: Record<string, any>;
+  params?: Record<string, any>;
+  action?: string;
   userAddress?: string;
 };
 
@@ -26,23 +28,31 @@ function errorMessage(error: unknown): string {
   return "Unknown error";
 }
 
-function hasRequiredBodyFields(body: ExecuteRequestBody): body is {
-  agentId: string;
-  userConfig: Record<string, any>;
-  userAddress: string;
-} {
-  return (
-    typeof body.agentId === "string" &&
-    body.agentId.trim().length > 0 &&
-    isRecord(body.userConfig) &&
-    typeof body.userAddress === "string" &&
-    body.userAddress.trim().length > 0
-  );
+function normalizeAgentId(value: unknown): string | null {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value).toString();
+  }
+
+  return null;
+}
+
+function resolveConfig(body: ExecuteRequestBody): Record<string, any> | null {
+  if (isRecord(body.userConfig)) {
+    return body.userConfig as Record<string, any>;
+  }
+  if (isRecord(body.params)) {
+    return body.params as Record<string, any>;
+  }
+  return null;
 }
 
 function ensureServerEnv(): { rpcUrl: string; privateKey: string } {
   const rpcUrl = process.env.NEXT_PUBLIC_HELA_RPC;
-  const privateKey = process.env.HELA_PRIVATE_KEY;
+  const privateKey = process.env.HELA_PRIVATE_KEY || process.env.PRIVATE_KEY;
 
   if (!rpcUrl || !privateKey) {
     throw new Error("Server misconfigured");
@@ -70,16 +80,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Malformed JSON body" }, { status: 400 });
   }
 
-  if (!hasRequiredBodyFields(body)) {
+  const agentId = normalizeAgentId(body.agentId);
+  const userConfig = resolveConfig(body);
+  const userAddress = typeof body.userAddress === "string" && body.userAddress.trim().length > 0
+    ? body.userAddress.trim()
+    : null;
+
+  if (!agentId || !userConfig) {
     return NextResponse.json(
       {
-        error: "agentId, userConfig, and userAddress are required"
+        error: "agentId and userConfig are required"
       },
       { status: 400 }
     );
   }
-
-  const { agentId, userConfig, userAddress } = body;
 
   try {
     console.log("[EXECUTE] Step 1: checking agent availability");
@@ -92,22 +106,24 @@ export async function POST(req: Request) {
     const execution = await runAgent(agentId, userConfig);
 
     let txHash: string | undefined;
-    // Non-blocking on-chain logging; user response must not fail if this step errors.
-    try {
-      console.log("[EXECUTE] Step 3: logging execution on-chain");
-      const { rpcUrl, privateKey } = ensureServerEnv();
-      const provider = new ethers.JsonRpcProvider(rpcUrl);
-      const signer = new ethers.Wallet(privateKey, provider);
+    if (userAddress) {
+      // Non-blocking on-chain logging; user response must not fail if this step errors.
+      try {
+        console.log("[EXECUTE] Step 3: logging execution on-chain");
+        const { rpcUrl, privateKey } = ensureServerEnv();
+        const provider = new ethers.JsonRpcProvider(rpcUrl);
+        const signer = new ethers.Wallet(privateKey, provider);
 
-      const executorReadContract = await getExecutorContract(false);
-      const executorContract = executorReadContract.connect(signer);
-      const logExecution = executorContract.getFunction("logExecution");
-      const tx = await logExecution(agentId, userAddress, "agent_run", execution.result);
-      const receipt = await tx.wait();
-      txHash = receipt?.hash || tx.hash;
-      console.log("[EXECUTE] On-chain execution log complete", txHash);
-    } catch (logError: unknown) {
-      console.warn("[EXECUTE] Non-blocking on-chain log failed:", errorMessage(logError));
+        const executorReadContract = await getExecutorContract(false);
+        const executorContract = executorReadContract.connect(signer);
+        const logExecution = executorContract.getFunction("logExecution");
+        const tx = await logExecution(agentId, userAddress, "agent_run", execution.result);
+        const receipt = await tx.wait();
+        txHash = receipt?.hash || tx.hash;
+        console.log("[EXECUTE] On-chain execution log complete", txHash);
+      } catch (logError: unknown) {
+        console.warn("[EXECUTE] Non-blocking on-chain log failed:", errorMessage(logError));
+      }
     }
 
     return NextResponse.json(

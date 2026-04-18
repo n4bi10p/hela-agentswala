@@ -1,4 +1,5 @@
 import { BrowserProvider, Contract, JsonRpcProvider, parseUnits } from "ethers";
+import { ChainIntegrationError, normalizeChainError } from "./chainErrors";
 
 export type AgentType =
   | "trading"
@@ -17,6 +18,12 @@ export type AgentStruct = {
   developer: string;
   isActive: boolean;
   configSchema: string;
+};
+
+export type TxResult = {
+  hash: string;
+  blockNumber: number | null;
+  status: "success" | "reverted" | "unknown";
 };
 
 declare global {
@@ -53,7 +60,7 @@ const getAddresses = () => {
   const executor = process.env.NEXT_PUBLIC_AGENT_EXECUTOR_ADDRESS;
 
   if (!registry || !escrow || !executor) {
-    throw new Error("Missing NEXT_PUBLIC contract addresses in env");
+    throw new ChainIntegrationError("missing_env", "Missing NEXT_PUBLIC contract addresses in env");
   }
 
   return { registry, escrow, executor };
@@ -61,9 +68,46 @@ const getAddresses = () => {
 
 export const getReadProvider = () => new JsonRpcProvider(getRpcUrl());
 
+function normalizeAgent(agent: {
+  id: bigint;
+  name: string;
+  description: string;
+  agentType: string;
+  priceHLUSD: bigint;
+  developer: string;
+  isActive: boolean;
+  configSchema: string;
+}): AgentStruct {
+  return {
+    id: BigInt(agent.id),
+    name: String(agent.name),
+    description: String(agent.description),
+    agentType: String(agent.agentType),
+    priceHLUSD: BigInt(agent.priceHLUSD),
+    developer: String(agent.developer),
+    isActive: Boolean(agent.isActive),
+    configSchema: String(agent.configSchema)
+  };
+}
+
+function toTxResult(receipt: {
+  hash: string;
+  blockNumber: number | null;
+  status?: number | null;
+}): TxResult {
+  const status =
+    receipt.status === 1 ? "success" : receipt.status === 0 ? "reverted" : "unknown";
+
+  return {
+    hash: receipt.hash,
+    blockNumber: receipt.blockNumber,
+    status
+  };
+}
+
 export async function getSignerProvider() {
   if (typeof window === "undefined" || !window.ethereum) {
-    throw new Error("Wallet provider not found");
+    throw new ChainIntegrationError("wallet_not_found", "Wallet provider not found");
   }
   const provider = new BrowserProvider(window.ethereum as never);
   await provider.send("eth_requestAccounts", []);
@@ -103,31 +147,77 @@ export async function publishAgent(input: {
   agentType: AgentType;
   price: string;
   configSchema: string;
-}) {
-  const registry = await getRegistryContract(true);
-  const tx = await registry.publishAgent(
-    input.name,
-    input.description,
-    input.agentType,
-    parseUnits(input.price, 18),
-    input.configSchema
-  );
-  return tx.wait();
+}): Promise<TxResult> {
+  try {
+    const registry = await getRegistryContract(true);
+    const tx = await registry.publishAgent(
+      input.name,
+      input.description,
+      input.agentType,
+      parseUnits(input.price, 18),
+      input.configSchema
+    );
+    const receipt = await tx.wait();
+    return toTxResult(receipt);
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to publish agent");
+  }
 }
 
-export async function activateAgent(agentId: number, userConfig: string) {
-  const escrow = await getEscrowContract(true);
-  const tx = await escrow.activateAgent(agentId, userConfig);
-  return tx.wait();
+export async function activateAgent(agentId: number, userConfig: string): Promise<TxResult> {
+  try {
+    const escrow = await getEscrowContract(true);
+    const tx = await escrow.activateAgent(agentId, userConfig);
+    const receipt = await tx.wait();
+    return toTxResult(receipt);
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to activate agent");
+  }
 }
 
 export async function fetchAllAgents(): Promise<AgentStruct[]> {
-  const registry = await getRegistryContract(false);
-  return registry.getAllAgents();
+  try {
+    const registry = await getRegistryContract(false);
+    const agents = (await registry.getAllAgents()) as AgentStruct[];
+    return agents.map((agent) => normalizeAgent(agent));
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to fetch agents");
+  }
 }
 
-export async function logExecution(agentId: number, user: string, action: string, result: string) {
-  const executor = await getExecutorContract(true);
-  const tx = await executor.logExecution(agentId, user, action, result);
-  return tx.wait();
+export async function fetchAgentById(id: number): Promise<AgentStruct> {
+  try {
+    const registry = await getRegistryContract(false);
+    const agent = (await registry.getAgent(id)) as AgentStruct;
+    return normalizeAgent(agent);
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to fetch agent details");
+  }
+}
+
+export async function setAgentActive(id: number, active: boolean): Promise<TxResult> {
+  try {
+    const registry = await getRegistryContract(true);
+    const tx = await registry.setAgentActive(id, active);
+    const receipt = await tx.wait();
+    return toTxResult(receipt);
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to update agent status");
+  }
+}
+
+export async function logExecution(
+  agentId: number,
+  user: string,
+  action: string,
+  result: string
+): Promise<TxResult> {
+  try {
+    const executor = await getExecutorContract(true);
+    const tx = await executor.logExecution(agentId, user, action, result);
+    const receipt = await tx.wait();
+    return toTxResult(receipt);
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to log execution");
+  }
 }

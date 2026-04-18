@@ -7,3 +7,5 @@ typechain-types
 .env.local
 dist
 out
+deployments/latest.json
+deployments/hardhat.json

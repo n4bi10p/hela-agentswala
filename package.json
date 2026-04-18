@@ -7,7 +7,12 @@
     "clean": "hardhat clean",
     "compile": "hardhat compile",
     "test": "hardhat test",
-    "deploy:hela": "hardhat run scripts/deploy.ts --network helaTestnet"
+    "deploy:hlusd-demo": "hardhat run scripts/deployDemoHlusd.ts --network helaTestnet",
+    "deploy:local": "hardhat run scripts/deploy.ts --network hardhat",
+    "deploy:hela": "hardhat run scripts/deploy.ts --network helaTestnet",
+    "seed:hela": "hardhat run scripts/seed.ts --network helaTestnet",
+    "demo:check": "hardhat run scripts/demoCheck.ts --network helaTestnet",
+    "verify:hela": "hardhat run scripts/verify.ts --network helaTestnet"
   },
   "keywords": [],
   "author": "",

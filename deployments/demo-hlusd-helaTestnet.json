@@ -1,0 +1,8 @@
+{
+  "network": "helaTestnet",
+  "chainId": "666888",
+  "timestamp": "2026-04-18T10:35:46.955Z",
+  "deployer": "0x4E81d5892034B31f9d36F903605940f697446B6b",
+  "demoHlusdAddress": "0x6fEF5d9fe6051dED5cC838feD792c36252DF12bf",
+  "initialSupply": "10000000000000000000000000"
+}

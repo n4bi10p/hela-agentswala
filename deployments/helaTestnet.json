@@ -1,0 +1,12 @@
+{
+  "network": "helaTestnet",
+  "chainId": "666888",
+  "timestamp": "2026-04-18T10:36:18.942Z",
+  "deployer": "0x4E81d5892034B31f9d36F903605940f697446B6b",
+  "hlusdAddress": "0x6fEF5d9fe6051dED5cC838feD792c36252DF12bf",
+  "contracts": {
+    "agentRegistry": "0x539834B08c1654b598a9D0a28C883253b3C0460b",
+    "agentEscrow": "0xcD15d4C76F855D367a6f3b6b3781484dE1383af8",
+    "agentExecutor": "0x24072496189171977c4C6198ab0493D4D1Bf2b56"
+  }
+}
