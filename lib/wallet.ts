@@ -1,8 +1,20 @@
 import { BrowserProvider, Contract, formatUnits } from "ethers";
 import { ChainIntegrationError, normalizeChainError } from "./chainErrors";
 
+declare global {
+  interface Window {
+    ethereum?: {
+      isMetaMask?: boolean;
+      request: (payload: { method: string; params?: unknown[] }) => Promise<unknown>;
+      on?: (event: string, handler: (...args: any[]) => void) => void;
+      removeListener?: (event: string, handler: (...args: any[]) => void) => void;
+    };
+  }
+}
+
 const HELA_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || "666888");
 const HELA_CHAIN_ID_HEX = `0x${HELA_CHAIN_ID.toString(16)}`;
+const TROVIA_CONNECTED_ACCOUNT_KEY = "trovia.connectedAccount";
 const DEFAULT_HELA_RPC = "https://testnet-rpc.helachain.com";
 
 const ERC20_ABI = [
@@ -30,6 +42,31 @@ function getHLUSDTokenAddress() {
   return process.env.NEXT_PUBLIC_HLUSD_ADDRESS || process.env.NEXT_PUBLIC_HLUSD_TOKEN_ADDRESS;
 }
 
+function canUseStorage() {
+  return typeof window !== "undefined";
+}
+
+export function persistConnectedAccount(address: string) {
+  if (!canUseStorage()) {
+    return;
+  }
+  window.localStorage.setItem(TROVIA_CONNECTED_ACCOUNT_KEY, address);
+}
+
+export function clearConnectedAccount() {
+  if (!canUseStorage()) {
+    return;
+  }
+  window.localStorage.removeItem(TROVIA_CONNECTED_ACCOUNT_KEY);
+}
+
+export function getPersistedConnectedAccount(): string | null {
+  if (!canUseStorage()) {
+    return null;
+  }
+  return window.localStorage.getItem(TROVIA_CONNECTED_ACCOUNT_KEY);
+}
+
 export async function connectWallet(): Promise<string> {
   try {
     const ethereum = getEthereum();
@@ -51,6 +88,26 @@ export async function getCurrentAccount(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+export async function getConnectedAccount(): Promise<string | null> {
+  const persisted = getPersistedConnectedAccount();
+  if (!persisted) {
+    return null;
+  }
+
+  const current = await getCurrentAccount();
+  if (!current) {
+    clearConnectedAccount();
+    return null;
+  }
+
+  if (current.toLowerCase() !== persisted.toLowerCase()) {
+    persistConnectedAccount(current);
+    return current;
+  }
+
+  return current;
 }
 
 export async function switchToHeLaNetwork() {

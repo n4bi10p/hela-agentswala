@@ -1,0 +1,44 @@
+"use strict";(()=>{var e={};e.id=959,e.ids=[959],e.modules={399:e=>{e.exports=require("next/dist/compiled/next-server/app-page.runtime.prod.js")},517:e=>{e.exports=require("next/dist/compiled/next-server/app-route.runtime.prod.js")},6035:(e,t,r)=>{r.r(t),r.d(t,{originalPathname:()=>b,patchFetch:()=>v,requestAsyncStorage:()=>y,routeModule:()=>h,serverHooks:()=>G,staticGenerationAsyncStorage:()=>x});var n={};r.r(n),r.d(n,{POST:()=>f});var i=r(9303),a=r(8716),s=r(670),o=r(7070),u=r(6945);let l=["trading","farming","scheduling","rebalancing","content","business"],c=["text","number","select","address"];function g(e){return e.replace(/```(?:json|ts|typescript|javascript)?/gi,"").replace(/```/g,"").trim()}function m(e){return"object"==typeof e&&null!==e}function p(e){return"string"==typeof e&&e.trim().length>0?e.trim():null}function d(e){let t=g(e);try{return JSON.parse(t)}catch{return null}}async function f(e){let t;console.log("[GENERATE] Received request");try{t=await e.json()}catch{return o.NextResponse.json({error:"Malformed JSON body"},{status:400})}let r="string"==typeof t.prompt?t.prompt.trim():"";if(!r)return o.NextResponse.json({error:"Prompt is required"},{status:400});try{console.log("[GENERATE] Step 1: generating schema with Gemini");let e="You are an AI agent schema generator. Return ONLY a valid JSON object with zero markdown, zero preamble, zero explanation. Any non-JSON output will break the system.",t=`Generate a complete agent schema for this request: ${r}
+Return ONLY this exact JSON structure:
+{
+  name: string (max 4 words),
+  description: string (one sentence, buyer-focused, no technical jargon),
+  agentType: one of exactly: trading | farming | scheduling | rebalancing | content | business,
+  priceHLUSD: number between 1 and 100,
+  configSchema: {
+    fields: [
+      {
+        key: camelCase string,
+        label: human readable string,
+        type: text | number | select | address,
+        required: boolean,
+        options: string array (only if type is select, else omit),
+        placeholder: string
+      }
+    ]
+  },
+  executionLogic: string (plain English, step by step, what this agent does),
+  geminiPrompt: string (the exact system prompt Gemini uses when THIS agent runs — written as if you ARE the agent executing),
+  tags: array of exactly 3 strings,
+  estimatedRuntime: string (e.g. every 5 minutes / on trigger / real-time / on demand)
+}`,n=await (0,u.D)(t,e),i=d(n);if(!i){console.log("[GENERATE] First schema parse failed, retrying once");let r=await (0,u.D)(t,e);if(!(i=d(r)))return o.NextResponse.json({error:"Failed to parse agent schema"},{status:500})}let a=function(e){if(!m(e))return{ok:!1,status:400,error:"Generated schema is not a JSON object"};let t=p(e.name);if(!t)return{ok:!1,status:400,error:"Generated schema missing name"};let r=p(e.description);if(!r)return{ok:!1,status:400,error:"Generated schema missing description"};let n=p(e.agentType);if(!n||!l.includes(n))return{ok:!1,status:400,error:"Generated schema has invalid agentType"};let i=e.priceHLUSD,a="number"==typeof i?i:"string"==typeof i?Number(i):Number.NaN;if(!Number.isFinite(a)||a<1||a>100)return{ok:!1,status:400,error:"Generated schema has invalid priceHLUSD"};let s=e.configSchema;if(!m(s)||!Array.isArray(s.fields))return{ok:!1,status:400,error:"Generated schema missing configSchema fields"};if(s.fields.length<1)return{ok:!1,status:400,error:"Generated schema must include at least one config field"};let o=[];for(let e of s.fields){let t=function(e){if(!m(e))return null;let t=p(e.key),r=p(e.label),n=p(e.type),i=e.required,a=e.placeholder;if(!t||!r||!n||"boolean"!=typeof i||!c.includes(n))return null;let s={key:t,label:r,type:n,required:i};if("string"==typeof a&&a.trim()&&(s.placeholder=a.trim()),"select"===s.type){if(!Array.isArray(e.options)||0===e.options.length)return null;let t=e.options.map(e=>"string"==typeof e?e.trim():"").filter(e=>e.length>0);if(0===t.length)return null;s.options=t}return s}(e);if(!t)return{ok:!1,status:400,error:"Generated schema contains invalid config field definitions"};o.push(t)}let u=p(e.executionLogic);if(!u)return{ok:!1,status:400,error:"Generated schema missing executionLogic"};let g=p(e.geminiPrompt);if(!g)return{ok:!1,status:400,error:"Generated schema missing geminiPrompt"};if(!Array.isArray(e.tags)||3!==e.tags.length)return{ok:!1,status:400,error:"Generated schema must include exactly 3 tags"};let d=e.tags.map(e=>"string"==typeof e?e.trim():"").filter(e=>e.length>0);if(3!==d.length)return{ok:!1,status:400,error:"Generated schema tags are invalid"};let f=p(e.estimatedRuntime);return f?{ok:!0,agent:{name:t,description:r,agentType:n,priceHLUSD:a,configSchema:{fields:o},executionLogic:u,geminiPrompt:g,tags:d,estimatedRuntime:f}}:{ok:!1,status:400,error:"Generated schema missing estimatedRuntime"}}(i);if(!a.ok)return o.NextResponse.json({error:a.error},{status:a.status});let s=a.agent;console.log("[GENERATE] Step 2: generating execution function with Gemini");let f=`Generate the execution function for this agent:
+Name: ${s.name}
+Type: ${s.agentType}
+Logic: ${s.executionLogic}
+Gemini Prompt: ${s.geminiPrompt}
+Config Fields: ${JSON.stringify(s.configSchema.fields)}
+
+Return ONLY this function (no imports, no exports):
+async function executeAgent(config) {
+  // your implementation here
+}
+
+Rules for implementation:
+- Access config values using config['fieldKey'] matching the configSchema keys
+- For content and business agentType: build a detailed prompt using config values, call await callGemini(prompt), return the response as result
+- For trading, farming, rebalancing agentType: simulate realistic logic using config values, return structured data object
+- For scheduling agentType: validate config, calculate next execution time, return confirmation
+- callGemini is globally available as callGemini(prompt)
+- Never import anything — callGemini is the only external dependency
+- Wrap everything in try/catch — on error return { success: false, result: error.message }
+- Must be syntactically valid JavaScript (Node.js runtime, no TypeScript type annotations)`,h=await (0,u.D)(f,"You are a JavaScript code generator. Return ONLY valid runnable JavaScript. Zero imports. Zero exports. Zero markdown. Zero explanation. The output will be passed directly to new Function() — any non-code output will cause a runtime crash."),y=g(h);if(!y)return o.NextResponse.json({error:"Failed to generate execution function"},{status:500});try{let e=Function(`return (${y})`)();if("function"!=typeof e)return o.NextResponse.json({error:"Generated execution code is not a function"},{status:500})}catch{return o.NextResponse.json({error:"Failed to generate executable JavaScript function"},{status:500})}return console.log("[GENERATE] Generation complete"),o.NextResponse.json({agent:s,executionCode:y,ready:!0},{status:200})}catch(t){let e=t instanceof Error?t.message:"Generation failed";return console.error("[GENERATE] Error",e),o.NextResponse.json({error:e},{status:500})}}let h=new i.AppRouteRouteModule({definition:{kind:a.x.APP_ROUTE,page:"/api/agents/generate/route",pathname:"/api/agents/generate",filename:"route",bundlePath:"app/api/agents/generate/route"},resolvedPagePath:"/home/n4bi10p/Buildbox/Devclash-HeLa/app/api/agents/generate/route.ts",nextConfigOutput:"",userland:n}),{requestAsyncStorage:y,staticGenerationAsyncStorage:x,serverHooks:G}=h,b="/api/agents/generate/route";function v(){return(0,s.patchFetch)({serverHooks:G,staticGenerationAsyncStorage:x})}},6945:(e,t,r)=>{r.d(t,{D:()=>s});var n=r(1258);function i(e){return e instanceof Error&&e.message?e.message:"Unknown Gemini error"}async function a(e,t){let r=(await e.generateContent({contents:[{role:"user",parts:[{text:t}]}]})).response.text();if(!r||!r.trim())throw Error("Gemini returned an empty response");return r.replace(/```(?:json|ts|typescript|javascript)?/gi,"").replace(/```/g,"").trim()}async function s(e,t){let r=process.env.GEMINI_API_KEY;if(!r)throw Error("Gemini configuration error: GEMINI_API_KEY is missing");let s=e.trim();if(!s)throw Error("Gemini call failed: prompt is required");let o=new n.$D(r).getGenerativeModel({model:"gemini-2.5-flash",systemInstruction:t?.trim()||void 0});try{return await a(o,s)}catch(e){if(e&&"object"==typeof e&&(429===e.status||429===e.statusCode||"string"==typeof e.message&&(e.message.includes("429")||/rate\s*limit/i.test(e.message)))){await new Promise(e=>{setTimeout(e,2e3)});try{return await a(o,s)}catch(e){throw Error(`Gemini request failed after retry: ${i(e)}`)}}throw Error(`Gemini request failed: ${i(e)}`)}}}};var t=require("../../../../webpack-runtime.js");t.C(e);var r=e=>t(t.s=e),n=t.X(0,[276,972,258],()=>r(6035));module.exports=n})();
