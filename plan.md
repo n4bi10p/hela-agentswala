@@ -84,9 +84,14 @@ Status: IN PROGRESS
 
 - [x] Keep `scripts/deploy.ts` environment-driven.
 - [x] Add output summary format for quick copy to `.env.local`.
-- [ ] Deploy contracts to HeLa testnet.
+- [x] Deploy contracts to HeLa testnet.
 - [ ] Verify all contracts on explorer.
-- [ ] Save addresses and verification links in README/demo notes.
+- [x] Save addresses and verification links in README/demo notes.
+
+Latest deployment (2026-04-18):
+- AgentRegistry: https://testnet-blockexplorer.helachain.com/address/0xB24786dB9E3DCC2Fb51A3033799AB7E7B0e05a1c
+- AgentEscrow: https://testnet-blockexplorer.helachain.com/address/0x05DEf75fbA3FF426Ca0Bc49CD39D4f15CE2aa39f
+- AgentExecutor: https://testnet-blockexplorer.helachain.com/address/0x6206F2F64a2B2F1D34832C2398c50F1020D9b1C7
 
 Deliverable:
 - Publicly verifiable deployed contracts.
