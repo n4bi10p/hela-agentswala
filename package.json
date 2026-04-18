@@ -8,7 +8,8 @@
     "compile": "hardhat compile",
     "test": "hardhat test",
     "deploy:local": "hardhat run scripts/deploy.ts --network hardhat",
-    "deploy:hela": "hardhat run scripts/deploy.ts --network helaTestnet"
+    "deploy:hela": "hardhat run scripts/deploy.ts --network helaTestnet",
+    "verify:hela": "hardhat run scripts/verify.ts --network helaTestnet"
   },
   "keywords": [],
   "author": "",

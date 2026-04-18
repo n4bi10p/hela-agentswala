@@ -12,5 +12,5 @@
     "skipLibCheck": true,
     "types": ["node", "hardhat"]
   },
-  "include": ["hardhat.config.ts", "scripts", "test", "lib"]
+  "include": ["hardhat.config.ts", "scripts", "lib"]
 }

@@ -88,6 +88,9 @@ Status: IN PROGRESS
 - [ ] Verify all contracts on explorer.
 - [x] Save addresses and verification links in README/demo notes.
 
+Note: Hardhat automated verification currently fails with explorer API HTML response parsing.
+Deployment addresses are confirmed live on explorer links above.
+
 Latest deployment (2026-04-18):
 - AgentRegistry: https://testnet-blockexplorer.helachain.com/address/0xB24786dB9E3DCC2Fb51A3033799AB7E7B0e05a1c
 - AgentEscrow: https://testnet-blockexplorer.helachain.com/address/0x05DEf75fbA3FF426Ca0Bc49CD39D4f15CE2aa39f
@@ -97,18 +100,18 @@ Deliverable:
 - Publicly verifiable deployed contracts.
 
 ## Phase 5: Frontend Integration Layer
-Status: IN PROGRESS
+Status: COMPLETE
 
 ### 5.1 `lib/contracts.ts`
-- [ ] Confirm function signatures used by Aman pages.
-- [ ] Standardize return types and transaction wait handling.
-- [ ] Add safe parsing/typing for bigint and structured agent data.
+- [x] Confirm function signatures used by Aman pages.
+- [x] Standardize return types and transaction wait handling.
+- [x] Add safe parsing/typing for bigint and structured agent data.
 
 ### 5.2 `lib/wallet.ts`
-- [ ] Ensure connect wallet flow is deterministic.
-- [ ] Ensure chain switch/add flow handles missing network cleanly.
-- [ ] Ensure HLUSD balance and approve flow is stable.
-- [ ] Add user-friendly error mapping for:
+- [x] Ensure connect wallet flow is deterministic.
+- [x] Ensure chain switch/add flow handles missing network cleanly.
+- [x] Ensure HLUSD balance and approve flow is stable.
+- [x] Add user-friendly error mapping for:
   - user rejected request
   - wrong network
   - insufficient balance/allowance

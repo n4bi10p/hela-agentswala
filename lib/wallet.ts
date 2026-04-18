@@ -1,4 +1,5 @@
 import { BrowserProvider, Contract, formatUnits } from "ethers";
+import { ChainIntegrationError, normalizeChainError } from "./chainErrors";
 
 declare global {
   interface Window {
@@ -20,24 +21,32 @@ const ERC20_ABI = [
 
 function getEthereum() {
   if (typeof window === "undefined" || !window.ethereum) {
-    throw new Error("MetaMask not found");
+    throw new ChainIntegrationError("wallet_not_found", "MetaMask wallet not found");
   }
   return window.ethereum;
 }
 
 export async function connectWallet(): Promise<string> {
-  const ethereum = getEthereum();
-  const accounts = (await ethereum.request({ method: "eth_requestAccounts" })) as string[];
-  if (!accounts.length) {
-    throw new Error("No account connected");
+  try {
+    const ethereum = getEthereum();
+    const accounts = (await ethereum.request({ method: "eth_requestAccounts" })) as string[];
+    if (!accounts.length) {
+      throw new ChainIntegrationError("invalid_input", "No account connected");
+    }
+    return accounts[0];
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to connect wallet");
   }
-  return accounts[0];
 }
 
 export async function getCurrentAccount(): Promise<string | null> {
-  const ethereum = getEthereum();
-  const accounts = (await ethereum.request({ method: "eth_accounts" })) as string[];
-  return accounts[0] || null;
+  try {
+    const ethereum = getEthereum();
+    const accounts = (await ethereum.request({ method: "eth_accounts" })) as string[];
+    return accounts[0] || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function switchToHeLaNetwork() {
@@ -66,42 +75,54 @@ export async function switchToHeLaNetwork() {
         ]
       });
     } else {
-      throw error;
+      throw normalizeChainError(error, "Failed to switch wallet network");
     }
   }
 }
 
 export async function ensureHeLaNetwork() {
-  const ethereum = getEthereum();
-  const currentChainId = (await ethereum.request({ method: "eth_chainId" })) as string;
-  if (currentChainId.toLowerCase() !== HELA_CHAIN_ID_HEX.toLowerCase()) {
-    await switchToHeLaNetwork();
+  try {
+    const ethereum = getEthereum();
+    const currentChainId = (await ethereum.request({ method: "eth_chainId" })) as string;
+    if (currentChainId.toLowerCase() !== HELA_CHAIN_ID_HEX.toLowerCase()) {
+      await switchToHeLaNetwork();
+    }
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to validate HeLa network");
   }
 }
 
 export async function getHLUSDBalance(address: string) {
-  const token = process.env.NEXT_PUBLIC_HLUSD_ADDRESS;
-  if (!token) {
-    throw new Error("Missing NEXT_PUBLIC_HLUSD_ADDRESS");
+  try {
+    const token = process.env.NEXT_PUBLIC_HLUSD_ADDRESS;
+    if (!token) {
+      throw new ChainIntegrationError("missing_env", "Missing NEXT_PUBLIC_HLUSD_ADDRESS");
+    }
+
+    const provider = new BrowserProvider(getEthereum() as never);
+    const contract = new Contract(token, ERC20_ABI, provider);
+
+    const [balance, decimals] = await Promise.all([contract.balanceOf(address), contract.decimals()]);
+    return formatUnits(balance, Number(decimals));
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to fetch HLUSD balance");
   }
-
-  const provider = new BrowserProvider(getEthereum() as never);
-  const contract = new Contract(token, ERC20_ABI, provider);
-
-  const [balance, decimals] = await Promise.all([contract.balanceOf(address), contract.decimals()]);
-  return formatUnits(balance, Number(decimals));
 }
 
 export async function approveHLUSD(spender: string, amount: bigint) {
-  const token = process.env.NEXT_PUBLIC_HLUSD_ADDRESS;
-  if (!token) {
-    throw new Error("Missing NEXT_PUBLIC_HLUSD_ADDRESS");
+  try {
+    const token = process.env.NEXT_PUBLIC_HLUSD_ADDRESS;
+    if (!token) {
+      throw new ChainIntegrationError("missing_env", "Missing NEXT_PUBLIC_HLUSD_ADDRESS");
+    }
+
+    const provider = new BrowserProvider(getEthereum() as never);
+    const signer = await provider.getSigner();
+    const contract = new Contract(token, ERC20_ABI, signer);
+
+    const tx = await contract.approve(spender, amount);
+    return tx.wait();
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to approve HLUSD");
   }
-
-  const provider = new BrowserProvider(getEthereum() as never);
-  const signer = await provider.getSigner();
-  const contract = new Contract(token, ERC20_ABI, signer);
-
-  const tx = await contract.approve(spender, amount);
-  return tx.wait();
 }
