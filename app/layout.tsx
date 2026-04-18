@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import ClientParticles from "@/components/ClientParticles";
 
 export const metadata: Metadata = {
   title: "Trovia - AI Agent Marketplace",
@@ -19,7 +20,10 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="bg-black">{children}</body>
+      <body className="bg-black">
+        <ClientParticles />
+        {children}
+      </body>
     </html>
   );
 }
