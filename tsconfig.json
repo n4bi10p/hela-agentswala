@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "es2021",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "strict": true,
+    "ignoreDeprecations": "6.0",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "types": ["node", "hardhat"]
+  },
+  "include": ["hardhat.config.ts", "scripts", "test", "lib"]
+}
