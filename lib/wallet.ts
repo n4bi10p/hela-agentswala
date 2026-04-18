@@ -8,7 +8,7 @@ declare global {
   }
 }
 
-const HELA_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || "8668");
+const HELA_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || "666888");
 const HELA_CHAIN_ID_HEX = `0x${HELA_CHAIN_ID.toString(16)}`;
 
 const ERC20_ABI = [

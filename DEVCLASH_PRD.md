@@ -47,7 +47,7 @@ PS 03 requires a functional marketplace with all 6 agent types:
 │    AgentRegistry · AgentEscrow · AgentExecutor      │
 └──────────────────────┬──────────────────────────────┘
                        │
-              HeLa Blockchain (Chain ID: 8668)
+              HeLa Blockchain (Chain ID: 666888)
 ```
 
 ---
@@ -62,7 +62,7 @@ PS 03 requires a functional marketplace with all 6 agent types:
 | Wallet | MetaMask (window.ethereum) |
 | Smart Contracts | Solidity ^0.8.20 + Hardhat |
 | AI Engine | Google Gemini 2.5 Flash API |
-| Chain | HeLa Testnet (Chain ID: 8668) |
+| Chain | HeLa Testnet (Chain ID: 666888) |
 | Payment Token | HLUSD (HeLa stablecoin) |
 | Deployment | Vercel (frontend) + HeLa Testnet (contracts) |
 
@@ -223,7 +223,7 @@ Dashboard → Click active agent → Chat/config interface
 **Pre-hackathon (tonight):**
 - [ ] Set up Hardhat project with HeLa testnet config
 - [ ] Write skeleton `AgentRegistry.sol`
-- [ ] Configure MetaMask on HeLa Chain ID 8668
+- [ ] Configure MetaMask on HeLa Chain ID 666888
 - [ ] Get test HLUSD from faucet
 
 **During hackathon:**

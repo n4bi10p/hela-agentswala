@@ -5,8 +5,14 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const HELA_RPC_URL = process.env.HELA_RPC_URL || "https://testnet-rpc.helachain.com";
-const HELA_CHAIN_ID = Number(process.env.HELA_CHAIN_ID || "8668");
-const PRIVATE_KEY = process.env.PRIVATE_KEY || "";
+const HELA_CHAIN_ID = Number(process.env.HELA_CHAIN_ID || "666888");
+const rawPrivateKey = (process.env.PRIVATE_KEY || "").trim();
+const normalizedPrivateKey = rawPrivateKey
+  ? rawPrivateKey.startsWith("0x")
+    ? rawPrivateKey
+    : `0x${rawPrivateKey}`
+  : "";
+const hasValidPrivateKey = /^0x[0-9a-fA-F]{64}$/.test(normalizedPrivateKey);
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -23,7 +29,7 @@ const config: HardhatUserConfig = {
     helaTestnet: {
       url: HELA_RPC_URL,
       chainId: HELA_CHAIN_ID,
-      accounts: PRIVATE_KEY ? [PRIVATE_KEY] : []
+      accounts: hasValidPrivateKey ? [normalizedPrivateKey] : []
     }
   }
 };
