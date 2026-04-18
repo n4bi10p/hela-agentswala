@@ -1,4 +1,4 @@
-# Nabil Implementation Plan (HeLa Agent Bazaar)
+# Nabil Implementation Plan (Trovia)
 
 Owner: Nabil
 Scope: Smart contracts + blockchain integration + deployment reliability

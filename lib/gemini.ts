@@ -1,89 +1,89 @@
+/**
+ * Shared Gemini client wrapper for all backend AI operations.
+ * Exports:
+ * - callGemini(prompt, systemInstruction?): invokes Gemini 2.5 Flash and returns clean plain text.
+ */
+
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const GEMINI_MODEL = "gemini-2.5-flash";
-const MAX_PROMPT_CHARS = 8000;
-const MAX_SYSTEM_CONTEXT_CHARS = 4000;
+const RETRY_DELAY_MS = 2000;
 
-class GeminiCallError extends Error {
-  statusCode: number;
-
-  constructor(message: string, statusCode = 500) {
-    super(message);
-    this.name = "GeminiCallError";
-    this.statusCode = statusCode;
-  }
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
-function mapGeminiError(error: unknown): GeminiCallError {
-  if (error instanceof GeminiCallError) {
-    return error;
-  }
-
-  const maybeError = error as {
-    status?: number;
-    statusCode?: number;
-    message?: string;
-  };
-
-  const statusCode = maybeError.statusCode ?? maybeError.status;
-  const message = (maybeError.message || "Gemini request failed").toString();
-
-  if (statusCode === 429 || message.includes("429") || /rate\s*limit/i.test(message)) {
-    return new GeminiCallError("Gemini rate limit reached. Please retry shortly.", 429);
-  }
-
-  if (statusCode === 400) {
-    return new GeminiCallError("Gemini rejected the request payload.", 400);
-  }
-
-  if (statusCode === 401 || statusCode === 403) {
-    return new GeminiCallError("Gemini authentication failed. Check GEMINI_API_KEY.", 500);
-  }
-
-  return new GeminiCallError("Gemini service is temporarily unavailable.", 502);
+function stripMarkdownFences(input: string): string {
+  return input
+    .replace(/```(?:json|ts|typescript|javascript)?/gi, "")
+    .replace(/```/g, "")
+    .trim();
 }
 
-export async function callGemini(prompt: string, systemContext?: string): Promise<string> {
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return "Unknown Gemini error";
+}
+
+function isRateLimitError(error: unknown): boolean {
+  if (error && typeof error === "object") {
+    const possible = error as { status?: number; statusCode?: number; message?: string };
+    if (possible.status === 429 || possible.statusCode === 429) {
+      return true;
+    }
+    if (typeof possible.message === "string" && (possible.message.includes("429") || /rate\s*limit/i.test(possible.message))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function generate(model: ReturnType<GoogleGenerativeAI["getGenerativeModel"]>, prompt: string): Promise<string> {
+  const response = await model.generateContent({
+    contents: [{ role: "user", parts: [{ text: prompt }] }]
+  });
+
+  const text = response.response.text();
+  if (!text || !text.trim()) {
+    throw new Error("Gemini returned an empty response");
+  }
+
+  return stripMarkdownFences(text);
+}
+
+export async function callGemini(prompt: string, systemInstruction?: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new GeminiCallError("Missing GEMINI_API_KEY environment variable.", 500);
+    throw new Error("Gemini configuration error: GEMINI_API_KEY is missing");
   }
 
   const normalizedPrompt = prompt.trim();
   if (!normalizedPrompt) {
-    throw new GeminiCallError("Prompt cannot be empty.", 400);
-  }
-  if (normalizedPrompt.length > MAX_PROMPT_CHARS) {
-    throw new GeminiCallError("Prompt is too large.", 400);
+    throw new Error("Gemini call failed: prompt is required");
   }
 
-  const normalizedSystemContext = systemContext?.trim();
-  if (normalizedSystemContext && normalizedSystemContext.length > MAX_SYSTEM_CONTEXT_CHARS) {
-    throw new GeminiCallError("System context is too large.", 400);
-  }
+  const client = new GoogleGenerativeAI(apiKey);
+  const model = client.getGenerativeModel({
+    model: GEMINI_MODEL,
+    systemInstruction: systemInstruction?.trim() || undefined
+  });
 
   try {
-    const client = new GoogleGenerativeAI(apiKey);
-    const model = client.getGenerativeModel({
-      model: GEMINI_MODEL,
-      systemInstruction: normalizedSystemContext || undefined
-    });
-
-    const result = await model.generateContent({
-      contents: [{ role: "user", parts: [{ text: normalizedPrompt }] }],
-      generationConfig: {
-        temperature: 0.5,
-        maxOutputTokens: 700
+    return await generate(model, normalizedPrompt);
+  } catch (error: unknown) {
+    if (isRateLimitError(error)) {
+      await sleep(RETRY_DELAY_MS);
+      try {
+        return await generate(model, normalizedPrompt);
+      } catch (retryError: unknown) {
+        throw new Error(`Gemini request failed after retry: ${getErrorMessage(retryError)}`);
       }
-    });
-
-    const text = result.response.text()?.trim();
-    if (!text) {
-      throw new GeminiCallError("Gemini returned an empty response.", 502);
     }
 
-    return text;
-  } catch (error: unknown) {
-    throw mapGeminiError(error);
+    throw new Error(`Gemini request failed: ${getErrorMessage(error)}`);
   }
 }

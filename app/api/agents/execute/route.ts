@@ -1,233 +1,133 @@
+/**
+ * Executes deployed/generated agents by id and logs runs on-chain.
+ * Exports:
+ * - POST: executes runtime code using user config and optionally records execution on-chain.
+ */
+
 import { NextResponse } from "next/server";
-import { runBusinessAgent } from "../business/route";
-import { runContentAgent } from "../content/route";
-import { runFarmingAgent } from "../farming/route";
-import { runRebalancingAgent } from "../rebalancing/route";
-import { runSchedulingAgent } from "../scheduling/route";
-import { runTradingAgent } from "../trading/route";
+import { ethers } from "ethers";
+import { getExecutorContract } from "../../../../lib/contracts";
+import { getAgent, runAgent } from "../../../../lib/agentRunner";
 
-type AgentType = "trading" | "farming" | "scheduling" | "rebalancing" | "content" | "business";
-
-type ExecuteInput = {
-  agentType: AgentType;
-  payload: unknown;
+type ExecuteRequestBody = {
+  agentId?: string;
+  userConfig?: Record<string, any>;
+  userAddress?: string;
 };
 
-type RouteError = {
-  statusCode?: number;
-  message?: string;
-};
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
-function validateTradingPayload(payload: Record<string, unknown>) {
-  if (typeof payload.tokenPair !== "string" || !payload.tokenPair.trim()) {
-    throw { statusCode: 400, message: "payload.tokenPair is required." };
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
   }
-  if (!isFiniteNumber(payload.thresholdPrice)) {
-    throw { statusCode: 400, message: "payload.thresholdPrice must be a valid number." };
-  }
-  if (typeof payload.action !== "string" || !payload.action.trim()) {
-    throw { statusCode: 400, message: "payload.action is required." };
-  }
-  if (!isFiniteNumber(payload.amount) || payload.amount <= 0) {
-    throw { statusCode: 400, message: "payload.amount must be a number greater than 0." };
-  }
-  if (!isFiniteNumber(payload.currentPrice)) {
-    throw { statusCode: 400, message: "payload.currentPrice must be a valid number." };
-  }
+  return "Unknown error";
 }
 
-function validateFarmingPayload(payload: Record<string, unknown>) {
-  if (typeof payload.lpAddress !== "string" || !payload.lpAddress.trim()) {
-    throw { statusCode: 400, message: "payload.lpAddress is required." };
-  }
-  if (!isFiniteNumber(payload.compoundThreshold)) {
-    throw { statusCode: 400, message: "payload.compoundThreshold must be a valid number." };
-  }
-  if (!isFiniteNumber(payload.currentAPY)) {
-    throw { statusCode: 400, message: "payload.currentAPY must be a valid number." };
-  }
+function hasRequiredBodyFields(body: ExecuteRequestBody): body is {
+  agentId: string;
+  userConfig: Record<string, any>;
+  userAddress: string;
+} {
+  return (
+    typeof body.agentId === "string" &&
+    body.agentId.trim().length > 0 &&
+    isRecord(body.userConfig) &&
+    typeof body.userAddress === "string" &&
+    body.userAddress.trim().length > 0
+  );
 }
 
-function validateSchedulingPayload(payload: Record<string, unknown>) {
-  if (typeof payload.recipient !== "string" || !payload.recipient.trim()) {
-    throw { statusCode: 400, message: "payload.recipient is required." };
+function ensureServerEnv(): { rpcUrl: string; privateKey: string } {
+  const rpcUrl = process.env.NEXT_PUBLIC_HELA_RPC;
+  const privateKey = process.env.HELA_PRIVATE_KEY;
+
+  if (!rpcUrl || !privateKey) {
+    throw new Error("Server misconfigured");
   }
-  if (!isFiniteNumber(payload.amount) || payload.amount <= 0) {
-    throw { statusCode: 400, message: "payload.amount must be a number greater than 0." };
-  }
+
+  // getExecutorContract(false) relies on all public contract addresses in lib/contracts.ts
   if (
-    typeof payload.frequency !== "string" ||
-    !["hourly", "daily", "weekly", "monthly"].includes(payload.frequency)
+    !process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS ||
+    !process.env.NEXT_PUBLIC_AGENT_ESCROW_ADDRESS ||
+    !process.env.NEXT_PUBLIC_AGENT_EXECUTOR_ADDRESS
   ) {
-    throw {
-      statusCode: 400,
-      message: "payload.frequency must be one of hourly, daily, weekly, monthly."
-    };
-  }
-  if (typeof payload.startDate !== "string" || !payload.startDate.trim()) {
-    throw { statusCode: 400, message: "payload.startDate is required." };
-  }
-}
-
-function validateAllocationMap(value: unknown, fieldName: string) {
-  if (!value || typeof value !== "object") {
-    throw { statusCode: 400, message: `payload.${fieldName} must be a JSON object of numeric values.` };
+    throw new Error("Server misconfigured");
   }
 
-  const entries = Object.entries(value as Record<string, unknown>);
-  if (!entries.length) {
-    throw { statusCode: 400, message: `payload.${fieldName} must not be empty.` };
-  }
-
-  for (const [, allocation] of entries) {
-    if (!isFiniteNumber(allocation) || allocation < 0) {
-      throw {
-        statusCode: 400,
-        message: `payload.${fieldName} values must be non-negative finite numbers.`
-      };
-    }
-  }
-}
-
-function validateRebalancingPayload(payload: Record<string, unknown>) {
-  validateAllocationMap(payload.targetAllocations, "targetAllocations");
-  validateAllocationMap(payload.currentAllocations, "currentAllocations");
-
-  if (!isFiniteNumber(payload.driftTolerance) || payload.driftTolerance < 0) {
-    throw { statusCode: 400, message: "payload.driftTolerance must be a non-negative number." };
-  }
-}
-
-function validateContentPayload(payload: Record<string, unknown>) {
-  if (typeof payload.message !== "string" || !payload.message.trim()) {
-    throw { statusCode: 400, message: "payload.message is required." };
-  }
-  if (typeof payload.brandContext !== "string" || !payload.brandContext.trim()) {
-    throw { statusCode: 400, message: "payload.brandContext is required." };
-  }
-  if (
-    typeof payload.tone !== "string" ||
-    !["professional", "casual", "aggressive"].includes(payload.tone)
-  ) {
-    throw { statusCode: 400, message: "payload.tone must be professional, casual, or aggressive." };
-  }
-}
-
-function validateBusinessPayload(payload: Record<string, unknown>) {
-  if (typeof payload.query !== "string" || !payload.query.trim()) {
-    throw { statusCode: 400, message: "payload.query is required." };
-  }
-  if (typeof payload.businessContext !== "string" || !payload.businessContext.trim()) {
-    throw { statusCode: 400, message: "payload.businessContext is required." };
-  }
-  if (typeof payload.language !== "string" || !payload.language.trim()) {
-    throw { statusCode: 400, message: "payload.language is required." };
-  }
-  if (typeof payload.formality !== "string" || !["formal", "informal"].includes(payload.formality)) {
-    throw { statusCode: 400, message: "payload.formality must be formal or informal." };
-  }
-}
-
-function validateAgentPayload(agentType: AgentType, payload: unknown) {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw { statusCode: 400, message: "payload must be a JSON object." };
-  }
-
-  const shape = payload as Record<string, unknown>;
-
-  if (agentType === "trading") {
-    validateTradingPayload(shape);
-    return;
-  }
-  if (agentType === "farming") {
-    validateFarmingPayload(shape);
-    return;
-  }
-  if (agentType === "scheduling") {
-    validateSchedulingPayload(shape);
-    return;
-  }
-  if (agentType === "rebalancing") {
-    validateRebalancingPayload(shape);
-    return;
-  }
-  if (agentType === "content") {
-    validateContentPayload(shape);
-    return;
-  }
-
-  validateBusinessPayload(shape);
-}
-
-function parseInput(body: unknown): ExecuteInput {
-  if (!body || typeof body !== "object") {
-    throw { statusCode: 400, message: "Request body must be a JSON object." };
-  }
-
-  const input = body as Partial<ExecuteInput>;
-  if (!input.agentType || typeof input.agentType !== "string") {
-    throw { statusCode: 400, message: "agentType is required." };
-  }
-  if (!("payload" in input)) {
-    throw { statusCode: 400, message: "payload is required." };
-  }
-  const allowed: AgentType[] = ["trading", "farming", "scheduling", "rebalancing", "content", "business"];
-  if (!allowed.includes(input.agentType as AgentType)) {
-    throw { statusCode: 400, message: "agentType is invalid." };
-  }
-
-  validateAgentPayload(input.agentType as AgentType, input.payload);
-
-  return {
-    agentType: input.agentType as AgentType,
-    payload: input.payload
-  };
+  return { rpcUrl, privateKey };
 }
 
 export async function POST(req: Request) {
+  console.log("[EXECUTE] Received request");
+
+  let body: ExecuteRequestBody;
   try {
-    const body = await req.json();
-    const input = parseInput(body);
+    body = (await req.json()) as ExecuteRequestBody;
+  } catch {
+    return NextResponse.json({ error: "Malformed JSON body" }, { status: 400 });
+  }
 
-    let result: unknown;
+  if (!hasRequiredBodyFields(body)) {
+    return NextResponse.json(
+      {
+        error: "agentId, userConfig, and userAddress are required"
+      },
+      { status: 400 }
+    );
+  }
 
-    if (input.agentType === "trading") {
-      result = await runTradingAgent(input.payload as never);
-    } else if (input.agentType === "farming") {
-      result = await runFarmingAgent(input.payload as never);
-    } else if (input.agentType === "scheduling") {
-      result = runSchedulingAgent(input.payload as never);
-    } else if (input.agentType === "rebalancing") {
-      result = await runRebalancingAgent(input.payload as never);
-    } else if (input.agentType === "content") {
-      result = await runContentAgent(input.payload as never);
-    } else {
-      result = await runBusinessAgent(input.payload as never);
+  const { agentId, userConfig, userAddress } = body;
+
+  try {
+    console.log("[EXECUTE] Step 1: checking agent availability");
+    const storedAgent = getAgent(agentId);
+    if (!storedAgent) {
+      return NextResponse.json({ error: "Agent not found" }, { status: 404 });
+    }
+
+    console.log("[EXECUTE] Step 2: running agent");
+    const execution = await runAgent(agentId, userConfig);
+
+    let txHash: string | undefined;
+    // Non-blocking on-chain logging; user response must not fail if this step errors.
+    try {
+      console.log("[EXECUTE] Step 3: logging execution on-chain");
+      const { rpcUrl, privateKey } = ensureServerEnv();
+      const provider = new ethers.JsonRpcProvider(rpcUrl);
+      const signer = new ethers.Wallet(privateKey, provider);
+
+      const executorReadContract = await getExecutorContract(false);
+      const executorContract = executorReadContract.connect(signer);
+      const logExecution = executorContract.getFunction("logExecution");
+      const tx = await logExecution(agentId, userAddress, "agent_run", execution.result);
+      const receipt = await tx.wait();
+      txHash = receipt?.hash || tx.hash;
+      console.log("[EXECUTE] On-chain execution log complete", txHash);
+    } catch (logError: unknown) {
+      console.warn("[EXECUTE] Non-blocking on-chain log failed:", errorMessage(logError));
     }
 
     return NextResponse.json(
       {
-        agentType: input.agentType,
-        result
+        success: execution.success,
+        result: execution.result,
+        data: execution.data,
+        txHash,
+        executedAt: execution.executedAt
       },
       { status: 200 }
     );
   } catch (error: unknown) {
-    if (error instanceof SyntaxError) {
-      return NextResponse.json({ error: "Malformed JSON body." }, { status: 400 });
+    const message = errorMessage(error);
+    console.error("[EXECUTE] Error", message);
+
+    if (message === "Agent not found") {
+      return NextResponse.json({ error: "Agent not found" }, { status: 404 });
     }
-    const mapped = error as RouteError;
-    const status = mapped.statusCode && mapped.statusCode >= 400 ? mapped.statusCode : 500;
-    const errorMessage = status >= 500 ? "Agent execution failed." : mapped.message || "Invalid request.";
-    return NextResponse.json(
-      {
-        error: errorMessage
-      },
-      { status }
-    );
+
+    return NextResponse.json({ error: "Execution failed" }, { status: 500 });
   }
 }
