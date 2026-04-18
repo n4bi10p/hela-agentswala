@@ -243,7 +243,7 @@ export default function AgentDetailPage() {
           <div className="text-center">
             <h1 className="mb-4 font-headline text-4xl text-white">AGENT NOT AVAILABLE</h1>
             <p className="mb-6 font-mono text-xs text-white/60">{error}</p>
-            <Link href="/marketplace" className="text-white hover:text-white/60 transition-colors">
+            <Link href="/marketplace" className="transition-colors hover:text-white/60">
               Back to Marketplace
             </Link>
           </div>
@@ -294,8 +294,8 @@ export default function AgentDetailPage() {
         <div className="flex flex-col gap-6 lg:col-span-2">
           <div>
             <p className="mb-3 font-mono text-xs uppercase text-white/40">{toAgentTypeLabel(agent.agentType)} AGENT</p>
-            <h1 className="mb-4 font-headline text-6xl text-white uppercase">{agent.name}</h1>
-            <p className="text-sm leading-relaxed text-white/60 uppercase">{agent.description}</p>
+            <h1 className="mb-4 font-headline text-6xl uppercase text-white">{agent.name}</h1>
+            <p className="text-sm uppercase leading-relaxed text-white/60">{agent.description}</p>
           </div>
 
           <div className="flex flex-col gap-6 border border-white/12 p-6">

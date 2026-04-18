@@ -146,13 +146,13 @@ export default function PublishPage() {
       persistConnectedAccount(connectedAccount);
 
       setStatusMessage("Submitting publish transaction...");
-        const txResult = await publishAgent({
-          name: formData.name.trim(),
-          description: formData.description.trim(),
-          agentType: formData.agentType as AgentType,
-          price: formData.price,
-          configSchema: formData.configSchema
-        });
+      const txResult = await publishAgent({
+        name: formData.name.trim(),
+        description: formData.description.trim(),
+        agentType: formData.agentType as AgentType,
+        price: formData.price,
+        configSchema: formData.configSchema
+      });
 
       setLastTxHash(txResult.hash);
       setStatusMessage("Agent published on-chain.");
@@ -269,7 +269,7 @@ export default function PublishPage() {
               />
             </div>
 
-            <div className="bg-white/5 border border-white/10 p-4">
+            <div className="border border-white/10 bg-white/5 p-4">
               <p className="font-mono text-xs font-bold uppercase text-white/60">Requirements</p>
               <p className="mt-2 text-xs uppercase leading-relaxed text-white/60">
                 Wallet on HeLa, valid config schema JSON, clear workflow disclosure, and a passed AI safety review before on-chain publishing.

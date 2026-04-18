@@ -101,7 +101,7 @@ export function WalletConnect() {
   return (
     <button
       onClick={address ? handleDisconnect : handleConnect}
-      className="font-mono text-xs hover:bg-white hover:text-black transition-colors duration-150 px-4 py-2 border border-white/20 bracket-btn"
+      className="bracket-btn border border-white/20 px-4 py-2 font-mono text-xs transition-colors duration-150 hover:bg-white hover:text-black"
     >
       {address
         ? `${address.slice(0, 6)}...${address.slice(-4)}`

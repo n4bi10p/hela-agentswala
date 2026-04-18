@@ -1,4 +1,3 @@
-import Image from "next/image";
 import Link from "next/link";
 
 interface AgentCardProps {
@@ -20,11 +19,11 @@ export function AgentCard({
   image,
   price,
   activeCount,
-  isLive,
+  isLive
 }: AgentCardProps) {
   return (
-    <div className="bg-surface-container-lowest border border-white/12 p-6 flex flex-col gap-6 hover:border-white transition-colors group">
-      <div className="flex justify-between items-start">
+    <div className="group flex flex-col gap-6 border border-white/12 bg-surface-container-lowest p-6 transition-colors hover:border-white">
+      <div className="flex items-start justify-between">
         <div className="font-headline text-3xl uppercase">{name}</div>
         <div
           className={`flex items-center gap-1 font-mono text-[10px] ${
@@ -32,7 +31,7 @@ export function AgentCard({
           }`}
         >
           <span
-            className={`w-2 h-2 rounded-full ${
+            className={`h-2 w-2 rounded-full ${
               isLive ? "bg-live-signal" : "bg-white/20"
             }`}
           ></span>
@@ -40,33 +39,33 @@ export function AgentCard({
         </div>
       </div>
 
-      <div className="w-full h-48 bg-black border border-white/5 relative overflow-hidden">
+      <div className="relative h-48 w-full overflow-hidden border border-white/5 bg-black">
         <img
           alt={description}
-          className="w-full h-full object-cover grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100 transition-all"
+          className="h-full w-full object-cover grayscale opacity-50 transition-all group-hover:opacity-100 group-hover:grayscale-0"
           src={image}
         />
       </div>
 
       <div>
-        <h3 className="font-headline text-2xl mb-2 uppercase">{type}</h3>
-        <p className="text-white/60 font-body text-xs leading-relaxed uppercase">
+        <h3 className="mb-2 font-headline text-2xl uppercase">{type}</h3>
+        <p className="font-body text-xs uppercase leading-relaxed text-white/60">
           {description}
         </p>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <span className="font-mono text-[10px] border border-white/20 px-2 py-1">
+        <span className="border border-white/20 px-2 py-1 font-mono text-[10px]">
           [ {activeCount} ACTIVE ]
         </span>
-        <span className="font-mono text-[10px] border border-white/20 px-2 py-1">
+        <span className="border border-white/20 px-2 py-1 font-mono text-[10px]">
           [ {price} HLUSD ]
         </span>
       </div>
 
       <Link
         href={`/agent/${id}`}
-        className="w-full border border-white py-3 font-headline text-xl hover:bg-white hover:text-black transition-colors text-center uppercase"
+        className="w-full border border-white py-3 text-center font-headline text-xl uppercase transition-colors hover:bg-white hover:text-black"
       >
         [ ACTIVATE ↗ ]
       </Link>

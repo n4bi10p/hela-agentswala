@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import { formatUnits } from "ethers";
+import { useEffect, useMemo, useState } from "react";
 import { TopNavBar } from "@/components/TopNavBar";
 import { AgentCard } from "@/components/AgentCard";
 import { fetchAgentActivationCount, fetchAllAgents, type AgentStruct } from "@/lib/contracts";

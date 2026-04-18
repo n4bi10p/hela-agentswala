@@ -48,7 +48,6 @@ function ensureServerEnv(): { rpcUrl: string; privateKey: string } {
     throw new Error("Server misconfigured");
   }
 
-  // getExecutorContract(false) relies on all public contract addresses in lib/contracts.ts
   if (
     !process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS ||
     !process.env.NEXT_PUBLIC_AGENT_ESCROW_ADDRESS ||
@@ -92,7 +91,6 @@ export async function POST(req: Request) {
     const execution = await runAgent(agentId, userConfig);
 
     let txHash: string | undefined;
-    // Non-blocking on-chain logging; user response must not fail if this step errors.
     try {
       console.log("[EXECUTE] Step 3: logging execution on-chain");
       const { rpcUrl, privateKey } = ensureServerEnv();
