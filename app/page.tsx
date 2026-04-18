@@ -28,7 +28,8 @@ export default function Home() {
   // Counter refs for stats
   const stat1 = useCountUp("6");
   const stat2 = useCountUp("100");
-  const stat3 = useCountUp("666888", 2000);
+  const stat3 = useCountUp("8668", 2000);
+  const stat4 = useCountUp("HLUSD");
 
   return (
     <main className="min-h-screen bg-black">
@@ -58,13 +59,13 @@ export default function Home() {
 
         {/* Main hero content */}
         <h1 className="font-headline text-[14vw] leading-none text-white whitespace-nowrap mb-8 select-none hero-title">TROVIA</h1>
-
+        
         <div className="relative z-10 flex flex-col items-center gap-6">
           <h2 className="font-headline text-4xl md:text-6xl text-center max-w-4xl tracking-tight text-white hero-subtitle">BRINGING AI AGENTS ON-CHAIN</h2>
-
+          
           <div className="flex flex-col items-center gap-6 hero-cta">
-            <Link
-              href="/marketplace"
+            <Link 
+              href="/marketplace" 
               className="bg-primary text-black px-12 py-4 font-headline text-2xl hover:bg-black hover:text-primary border border-primary transition-all duration-300 flex items-center gap-4 uppercase hover:shadow-lg hover:shadow-primary/50 glow-effect glitch-hover"
             >
               [ START NOW ↗ ]
@@ -78,21 +79,21 @@ export default function Home() {
           <div className="hela-floating-card group relative">
             {/* Animated border glow */}
             <div className="absolute -inset-[1px] bg-gradient-to-r from-white/30 via-white/10 to-white/30 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity duration-700 blur-[1px]"></div>
-
+            
             <div className="relative bg-black/70 backdrop-blur-xl border border-white/15 p-5 flex flex-col gap-3 w-[220px] rounded-sm group-hover:border-white/30 transition-all duration-500">
               {/* Top accent line */}
               <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/40 to-transparent"></div>
-
+              
               <div className="flex items-center gap-2">
                 <span className="text-lg text-white/80 group-hover:text-white transition-colors">⬡</span>
                 <span className="font-mono font-bold uppercase text-xs text-white tracking-wider">HeLa Chain</span>
                 <span className="ml-auto w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
               </div>
-
+              
               <p className="text-[10px] uppercase font-bold text-white/40 leading-snug tracking-wide group-hover:text-white/60 transition-colors">L1 Optimized for Autonomous Logic</p>
-
+              
               <div className="h-[1px] bg-white/10"></div>
-
+              
               <Link href="/publish" className="font-mono text-[11px] text-white/50 hover:text-white uppercase tracking-wider transition-colors duration-300 flex items-center gap-1">
                 <span>Deploy Agent</span>
                 <span className="text-white/30 group-hover:translate-x-1 transition-transform duration-300">↗</span>
@@ -262,8 +263,8 @@ export default function Home() {
           {[
             { ref: stat1, number: "6", suffix: "", label: "Agent Types" },
             { ref: stat2, number: "100", suffix: "%", label: "On-Chain" },
-            { ref: null, number: "HLUSD", suffix: "", label: "Stable Gas" },
-            { ref: stat3, number: "666888", suffix: "", label: "Chain ID" },
+            { ref: stat4, number: "HLUSD", suffix: "", label: "Stable Gas" },
+            { ref: stat3, number: "8668", suffix: "", label: "Chain ID" },
           ].map((stat, idx) => (
             <div key={idx} data-item className={`flex flex-col items-center md:items-start ${idx < 3 ? "md:border-r" : ""} border-black/10 px-8 group hover:opacity-60 transition-opacity duration-300`}>
               <div ref={stat.ref} className="font-headline text-[96px] leading-none uppercase group-hover:scale-110 transition-transform duration-300 reveal-scale">{stat.number === "HLUSD" ? "HLUSD" : "0"}{stat.suffix}</div>

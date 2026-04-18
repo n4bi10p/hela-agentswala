@@ -383,7 +383,7 @@ export default function PublishPage() {
       });
 
       const deployPayload = (await deployResponse.json()) as DeployResponse | { error?: string; details?: string };
-      if (!deployResponse.ok) {
+      if (!deployResponse.ok || !("txHash" in deployPayload)) {
         throw new Error(
           "error" in deployPayload && deployPayload.error
             ? deployPayload.details

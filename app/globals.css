@@ -36,8 +36,27 @@ body::before {
 }
 
 /* ============================================================
-   REVEAL ANIMATIONS — The core Aptos-style system
+   ACCESSIBILITY: Reduced Motion Fallback
+   Reduce ambient motion while preserving reveal loop behavior
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 
+  /* Keep scroll-reveal transitions intact, only stop continuous motion */
+  .float-anim,
+  .float-slow,
+  .pulse-glow,
+  .scroll-indicator {
+    animation: none !important;
+  }
+}
+
+
+/* ============================================================
+   REVEAL ANIMATIONS — The core Aptos-style system
+   
    Every animated element starts HIDDEN, then gets `.in-view`
    when it enters the viewport. Animations are DRAMATIC:
    - 50px travel distance (not 10px)

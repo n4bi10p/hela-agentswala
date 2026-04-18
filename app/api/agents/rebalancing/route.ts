@@ -166,12 +166,19 @@ function parseTokenList(value: unknown, target: AllocationMap): TokenConfig[] {
 
   return Object.keys(target)
     .map((symbol) => symbol.toUpperCase())
-    .map((symbol) => ({
-      symbol,
-      address: DEFAULT_TOKEN_METADATA[symbol]?.address,
-      coingeckoId: DEFAULT_TOKEN_METADATA[symbol]?.coingeckoId
-    }))
-    .filter((entry): entry is TokenConfig => typeof entry.address === "string");
+    .map((symbol) => {
+      const metadata = DEFAULT_TOKEN_METADATA[symbol];
+      if (!metadata) {
+        return null;
+      }
+
+      return {
+        symbol,
+        address: metadata.address,
+        ...(metadata.coingeckoId ? { coingeckoId: metadata.coingeckoId } : {})
+      };
+    })
+    .filter((entry): entry is TokenConfig => entry !== null);
 }
 
 function parseBody(body: unknown): RebalancingConfig {

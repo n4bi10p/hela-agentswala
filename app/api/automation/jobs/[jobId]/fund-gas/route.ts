@@ -73,8 +73,8 @@ export async function POST(req: Request, context: RouteContext) {
         agentWalletAddress: storedAgent.agentWalletAddress,
         fundedAmount: amount,
         txHash: receipt?.hash || tx.hash,
-        nativeBalanceHELA: formatEther(nativeBalance),
-        ...funding
+        ...funding,
+        nativeBalanceHELA: formatEther(nativeBalance)
       },
       { status: 200 }
     );

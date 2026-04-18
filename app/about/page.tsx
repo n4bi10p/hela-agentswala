@@ -72,7 +72,7 @@ export default function AboutPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {[
                   { title: "Frontend", items: ["Next.js 14 with App Router", "React 18 + TypeScript", "Tailwind CSS", "MetaMask Integration"] },
-                  { title: "Blockchain", items: ["HeLa Testnet (Chain ID 666888)", "Smart Contracts (Solidity)", "Ethers.js v6", "Agent Escrow & Execution"] },
+                  { title: "Blockchain", items: ["HeLa Testnet (Chain ID 8668)", "Smart Contracts (Solidity)", "Ethers.js v6", "Agent Escrow & Execution"] },
                   { title: "AI", items: ["Google Gemini API", "Natural Language Processing", "Agent Intelligence Layer"] },
                   { title: "Infrastructure", items: ["API Routes (Next.js)", "Cloud Deployment Ready", "Health Monitoring"] },
                 ].map((stack, i) => (

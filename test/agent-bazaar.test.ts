@@ -1,7 +1,9 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import hre from "hardhat";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
+import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs.js";
+
+const { ethers } = hre;
 
 describe("HeLa Agent Bazaar contracts", function () {
   async function deployFixture() {
