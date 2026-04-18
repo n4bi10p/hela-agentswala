@@ -3,7 +3,7 @@
 import { TopNavBar } from "@/components/TopNavBar";
 import Link from "next/link";
 import { useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 
 const AGENTS: Record<
   string,
@@ -45,6 +45,11 @@ const AGENTS: Record<
         placeholder: "e.g., 0.98",
       },
       {
+        field: "Current Price",
+        type: "number",
+        placeholder: "e.g., 0.95",
+      },
+      {
         field: "Action Type",
         type: "select",
         placeholder: "Alert or Execute",
@@ -76,9 +81,9 @@ const AGENTS: Record<
         placeholder: "0x...",
       },
       {
-        field: "Compound Frequency",
-        type: "select",
-        placeholder: "Daily/Weekly/Monthly",
+        field: "Current APY",
+        type: "number",
+        placeholder: "e.g., 12.5",
       },
       {
         field: "Threshold",
@@ -101,6 +106,11 @@ const AGENTS: Record<
     activeCount: 12,
     isLive: false,
     config: [
+      {
+        field: "Sample Message",
+        type: "textarea",
+        placeholder: "Paste a sample incoming message...",
+      },
       {
         field: "Tone",
         type: "select",
@@ -204,6 +214,11 @@ const AGENTS: Record<
         placeholder: "HLUSD:60%, ETH:30%, OTHER:10%",
       },
       {
+        field: "Current Allocation",
+        type: "text",
+        placeholder: "Optional: HLUSD:55%, ETH:35%, OTHER:10%",
+      },
+      {
         field: "Drift Tolerance %",
         type: "number",
         placeholder: "5",
@@ -229,6 +244,11 @@ const AGENTS: Record<
     isLive: true,
     config: [
       {
+        field: "Query",
+        type: "textarea",
+        placeholder: "Ask what support you need from the agent...",
+      },
+      {
         field: "Business Type",
         type: "text",
         placeholder: "e.g., SaaS, Agency, Retail",
@@ -243,17 +263,227 @@ const AGENTS: Record<
         type: "select",
         placeholder: "English/Other",
       },
+      {
+        field: "Formality",
+        type: "select",
+        placeholder: "formal/informal",
+      },
     ],
   },
 };
 
+const FIELD_SELECT_OPTIONS: Record<string, string[]> = {
+  "Action Type": ["buy", "sell", "hold"],
+  "Compound Frequency": ["daily", "weekly", "monthly"],
+  Tone: ["professional", "casual", "aggressive"],
+  Language: ["English", "Hindi", "Spanish"],
+  Frequency: ["hourly", "daily", "weekly", "monthly"],
+  "Response Language": ["English", "Hindi", "Spanish"],
+  Formality: ["formal", "informal"],
+};
+
+type ActivationRequest = {
+  endpoint: string;
+  payload: Record<string, unknown>;
+};
+
+function readField(formData: Record<string, string>, field: string): string {
+  return (formData[field] || "").trim();
+}
+
+function parseRequiredNumber(formData: Record<string, string>, field: string): number {
+  const raw = readField(formData, field);
+  if (!raw) {
+    throw new Error(`${field} is required.`);
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`${field} must be a valid number.`);
+  }
+  return parsed;
+}
+
+function parseAllocationMap(raw: string): Record<string, number> {
+  const result: Record<string, number> = {};
+  const parts = raw
+    .split(",")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+
+  for (const part of parts) {
+    const [token, value] = part.split(":").map((segment) => segment.trim());
+    if (!token || !value) {
+      continue;
+    }
+    const numericValue = Number(value.replace("%", "").trim());
+    if (Number.isFinite(numericValue)) {
+      result[token] = numericValue;
+    }
+  }
+
+  return result;
+}
+
+function deriveCurrentAllocations(targetAllocations: Record<string, number>): Record<string, number> {
+  const entries = Object.entries(targetAllocations);
+  if (entries.length < 2) {
+    return { ...targetAllocations };
+  }
+
+  const current = { ...targetAllocations };
+  const [firstToken, firstValue] = entries[0];
+  const [secondToken, secondValue] = entries[1];
+
+  const drift = Math.min(5, secondValue);
+  current[firstToken] = Number((firstValue + drift).toFixed(2));
+  current[secondToken] = Number((secondValue - drift).toFixed(2));
+
+  return current;
+}
+
+function normalizeDateToIso(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error("Start Date must be a valid date.");
+  }
+  return parsed.toISOString();
+}
+
+function buildActivationRequest(agentId: string, formData: Record<string, string>): ActivationRequest {
+  if (agentId === "1") {
+    const thresholdPrice = parseRequiredNumber(formData, "Price Threshold");
+    const amount = parseRequiredNumber(formData, "Amount");
+    const currentPriceRaw = readField(formData, "Current Price");
+    const currentPrice = currentPriceRaw ? Number(currentPriceRaw) : thresholdPrice;
+
+    if (!Number.isFinite(currentPrice)) {
+      throw new Error("Current Price must be a valid number.");
+    }
+
+    return {
+      endpoint: "/api/agents/trading",
+      payload: {
+        tokenPair: readField(formData, "Token Pair") || "HLUSD/ETH",
+        thresholdPrice,
+        currentPrice,
+        action: (readField(formData, "Action Type") || "buy").toLowerCase(),
+        amount,
+      },
+    };
+  }
+
+  if (agentId === "2") {
+    const compoundThreshold = parseRequiredNumber(formData, "Threshold");
+    const currentAPYRaw = readField(formData, "Current APY");
+    const currentAPY = currentAPYRaw ? Number(currentAPYRaw) : compoundThreshold + 1;
+
+    if (!Number.isFinite(currentAPY)) {
+      throw new Error("Current APY must be a valid number.");
+    }
+
+    return {
+      endpoint: "/api/agents/farming",
+      payload: {
+        lpAddress: readField(formData, "LP Token Address") || "0x0000000000000000000000000000000000000000",
+        compoundThreshold,
+        currentAPY,
+      },
+    };
+  }
+
+  if (agentId === "3") {
+    return {
+      endpoint: "/api/agents/content",
+      payload: {
+        message:
+          readField(formData, "Sample Message") ||
+          "Thanks for your message. Can we continue this conversation?",
+        tone: (readField(formData, "Tone") || "professional").toLowerCase(),
+        brandContext: readField(formData, "Brand Context") || "General brand context",
+      },
+    };
+  }
+
+  if (agentId === "4") {
+    const thresholdPrice = parseRequiredNumber(formData, "Min Profit Threshold %");
+    const amount = parseRequiredNumber(formData, "Max Gas Price");
+
+    return {
+      endpoint: "/api/agents/trading",
+      payload: {
+        tokenPair: readField(formData, "Token Pair") || "HLUSD/ETH",
+        thresholdPrice,
+        currentPrice: thresholdPrice,
+        action: "buy",
+        amount,
+      },
+    };
+  }
+
+  if (agentId === "5") {
+    const amount = parseRequiredNumber(formData, "Amount (HLUSD)");
+    const frequencyRaw = readField(formData, "Frequency").toLowerCase();
+    const frequency = ["hourly", "daily", "weekly", "monthly"].includes(frequencyRaw)
+      ? frequencyRaw
+      : "daily";
+
+    return {
+      endpoint: "/api/agents/scheduling",
+      payload: {
+        recipient: readField(formData, "Recipient Address"),
+        amount,
+        frequency,
+        startDate: normalizeDateToIso(readField(formData, "Start Date")),
+      },
+    };
+  }
+
+  if (agentId === "6") {
+    const targetRaw = readField(formData, "Target Allocation");
+    const targetAllocations = parseAllocationMap(targetRaw);
+    if (!Object.keys(targetAllocations).length) {
+      throw new Error("Target Allocation must include at least one token:value pair.");
+    }
+
+    const currentRaw = readField(formData, "Current Allocation");
+    const currentAllocations = Object.keys(parseAllocationMap(currentRaw)).length
+      ? parseAllocationMap(currentRaw)
+      : deriveCurrentAllocations(targetAllocations);
+
+    return {
+      endpoint: "/api/agents/rebalancing",
+      payload: {
+        targetAllocations,
+        currentAllocations,
+        driftTolerance: parseRequiredNumber(formData, "Drift Tolerance %"),
+      },
+    };
+  }
+
+  const businessType = readField(formData, "Business Type") || "general";
+  return {
+    endpoint: "/api/agents/business",
+    payload: {
+      query:
+        readField(formData, "Query") ||
+        `Give three practical growth actions for a ${businessType} business.`,
+      businessContext: readField(formData, "Industry Context") || businessType,
+      language: readField(formData, "Response Language") || "English",
+      formality: (readField(formData, "Formality") || "formal").toLowerCase(),
+    },
+  };
+}
+
 export default function AgentDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const agentId = params.id as string;
   const agent = AGENTS[agentId];
 
   const [formData, setFormData] = useState<Record<string, string>>({});
   const [isActivating, setIsActivating] = useState(false);
+  const [activationError, setActivationError] = useState<string | null>(null);
+  const [activationSuccess, setActivationSuccess] = useState<string | null>(null);
 
   if (!agent) {
     return (
@@ -284,13 +514,44 @@ export default function AgentDetailPage() {
   };
 
   const handleActivate = async () => {
+    if (!agent) {
+      return;
+    }
+
+    setActivationError(null);
+    setActivationSuccess(null);
     setIsActivating(true);
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    setIsActivating(false);
-    alert(
-      `Agent ${agent.name} activated successfully! Configuration: ${JSON.stringify(formData)}`
-    );
+
+    try {
+      const { endpoint, payload } = buildActivationRequest(agentId, formData);
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(data.error || "Activation request failed.");
+      }
+
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(`agent-config-${agentId}`, JSON.stringify(formData));
+      }
+
+      setActivationSuccess(`Agent ${agent.name} activated successfully.`);
+
+      if (agentId === "3" || agentId === "7") {
+        router.push(`/agent/${agentId}/run`);
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Activation failed.";
+      setActivationError(message);
+    } finally {
+      setIsActivating(false);
+    }
   };
 
   return (
@@ -389,8 +650,11 @@ export default function AgentDetailPage() {
                       className="bg-surface-container border border-white/20 text-white placeholder-white/30 p-3 font-mono text-sm focus:outline-none focus:border-white transition-colors"
                     >
                       <option value="">{configItem.placeholder}</option>
-                      <option value="option1">Option 1</option>
-                      <option value="option2">Option 2</option>
+                      {(FIELD_SELECT_OPTIONS[configItem.field] || ["option1", "option2"]).map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
                     </select>
                   ) : (
                     <input
@@ -414,6 +678,18 @@ export default function AgentDetailPage() {
             >
               {isActivating ? "ACTIVATING..." : "[ ACTIVATE ↗ ]"}
             </button>
+
+            {activationError && (
+              <div className="border border-red-500/60 bg-red-500/10 p-3">
+                <p className="font-mono text-xs text-red-200 uppercase">{activationError}</p>
+              </div>
+            )}
+
+            {activationSuccess && (
+              <div className="border border-green-500/60 bg-green-500/10 p-3">
+                <p className="font-mono text-xs text-green-200 uppercase">{activationSuccess}</p>
+              </div>
+            )}
 
             <Link
               href="/marketplace"

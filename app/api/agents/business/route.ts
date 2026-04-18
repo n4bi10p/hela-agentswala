@@ -8,6 +8,7 @@ type BusinessInput = {
   businessContext: string;
   language: string;
   formality: Formality;
+  frontendConfig?: Record<string, unknown>;
 };
 
 type BusinessResult = {
@@ -18,6 +19,10 @@ type RouteError = {
   statusCode?: number;
   message?: string;
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function humanizeFieldName(field: string): string {
   const withoutPrefix = field.replace(/^payload\./, "");
@@ -61,6 +66,9 @@ function toNaturalLanguageError(status: number, rawMessage: string | undefined, 
   if (message === "formality must be formal or informal.") {
     return "Please set formality to formal or informal.";
   }
+  if (message === "frontendConfigText must be a valid JSON object.") {
+    return "Configuration payload is invalid. Please reactivate the agent configuration and try again.";
+  }
 
   const requiredMatch = message.match(/^(.+) is required\.$/);
   if (requiredMatch) {
@@ -75,12 +83,36 @@ function toNaturalLanguageError(status: number, rawMessage: string | undefined, 
   return "Please review your request and try again.";
 }
 
+function parseFrontendConfig(value: unknown): Record<string, unknown> | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  if (isRecord(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (!isRecord(parsed)) {
+        throw new Error();
+      }
+      return parsed;
+    } catch {
+      throw { statusCode: 400, message: "frontendConfigText must be a valid JSON object." };
+    }
+  }
+
+  throw { statusCode: 400, message: "frontendConfigText must be a valid JSON object." };
+}
+
 function parseInput(body: unknown): BusinessInput {
   if (!body || typeof body !== "object") {
     throw { statusCode: 400, message: "Request body must be a JSON object." };
   }
 
-  const input = body as Partial<BusinessInput>;
+  const input = body as Partial<BusinessInput> & { frontendConfigText?: unknown };
   if (!input.query || typeof input.query !== "string") {
     throw { statusCode: 400, message: "query is required." };
   }
@@ -98,11 +130,12 @@ function parseInput(body: unknown): BusinessInput {
     query: input.query.trim(),
     businessContext: input.businessContext.trim(),
     language: input.language.trim(),
-    formality: input.formality as Formality
+    formality: input.formality as Formality,
+    frontendConfig: parseFrontendConfig(input.frontendConfigText)
   };
 }
 
-export async function runBusinessAgent(input: BusinessInput): Promise<BusinessResult> {
+async function runBusinessAgent(input: BusinessInput): Promise<BusinessResult> {
   const systemContext = [
     "You are a senior business operations assistant.",
     `Always respond in ${input.language}.`,
@@ -112,7 +145,10 @@ export async function runBusinessAgent(input: BusinessInput): Promise<BusinessRe
 
   const prompt = [
     `Business context: ${input.businessContext}`,
-    `User query: ${input.query}`
+    `User query: ${input.query}`,
+    input.frontendConfig
+      ? `Frontend configuration JSON: ${JSON.stringify(input.frontendConfig)}`
+      : "Frontend configuration JSON: {}"
   ].join("\n");
 
   const response = await callGemini(prompt, systemContext);

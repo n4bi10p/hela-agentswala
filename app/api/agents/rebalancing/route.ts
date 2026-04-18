@@ -138,7 +138,7 @@ function parseInput(body: unknown): RebalancingInput {
   };
 }
 
-export async function runRebalancingAgent(input: RebalancingInput): Promise<RebalancingResult> {
+async function runRebalancingAgent(input: RebalancingInput): Promise<RebalancingResult> {
   const tokens = Array.from(
     new Set([...Object.keys(input.targetAllocations), ...Object.keys(input.currentAllocations)])
   );

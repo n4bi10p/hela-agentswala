@@ -6,10 +6,21 @@
  * - runAgent: execute stored runtime code safely and normalize output
  */
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { callGemini } from "./gemini";
 import type { AgentObject, ExecutionResult, StoredAgent } from "../types/agent";
 
-const agentStore = new Map<string, StoredAgent>();
+const STORE_FILE_PATH = join(process.cwd(), ".runtime", "agent-store.json");
+
+const globalStore = globalThis as typeof globalThis & {
+  __troviaAgentStore?: Map<string, StoredAgent>;
+};
+
+const agentStore = globalStore.__troviaAgentStore ?? new Map<string, StoredAgent>();
+if (!globalStore.__troviaAgentStore) {
+  globalStore.__troviaAgentStore = agentStore;
+}
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
@@ -20,6 +31,55 @@ function errorMessage(error: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isStoredAgent(value: unknown): value is StoredAgent {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isRecord(value.agent) &&
+    typeof value.executionCode === "string" &&
+    typeof value.deployedAt === "string" &&
+    typeof value.developerAddress === "string" &&
+    typeof value.agentId === "string"
+  );
+}
+
+function readPersistedStore(): Record<string, StoredAgent> {
+  try {
+    if (!existsSync(STORE_FILE_PATH)) {
+      return {};
+    }
+
+    const raw = readFileSync(STORE_FILE_PATH, "utf8");
+    if (!raw.trim()) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) {
+      return {};
+    }
+
+    const normalized: Record<string, StoredAgent> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (isStoredAgent(value)) {
+        normalized[key] = value;
+      }
+    }
+
+    return normalized;
+  } catch {
+    return {};
+  }
+}
+
+function writePersistedStore(store: Record<string, StoredAgent>): void {
+  const dir = dirname(STORE_FILE_PATH);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(STORE_FILE_PATH, JSON.stringify(store, null, 2), "utf8");
 }
 
 /**
@@ -35,13 +95,19 @@ export function storeAgent(
   executionCode: string,
   developerAddress: string
 ): void {
-  agentStore.set(agentId, {
+  const stored: StoredAgent = {
     agent,
     executionCode,
     deployedAt: new Date().toISOString(),
     developerAddress,
     agentId
-  });
+  };
+
+  agentStore.set(agentId, stored);
+
+  const persisted = readPersistedStore();
+  persisted[agentId] = stored;
+  writePersistedStore(persisted);
 }
 
 /**
@@ -50,7 +116,19 @@ export function storeAgent(
  * @returns Stored agent payload if found, otherwise undefined.
  */
 export function getAgent(agentId: string): StoredAgent | undefined {
-  return agentStore.get(agentId);
+  const inMemory = agentStore.get(agentId);
+  if (inMemory) {
+    return inMemory;
+  }
+
+  const persisted = readPersistedStore();
+  const fromDisk = persisted[agentId];
+  if (fromDisk) {
+    agentStore.set(agentId, fromDisk);
+    return fromDisk;
+  }
+
+  return undefined;
 }
 
 /**

@@ -1,16 +1,9 @@
 import { BrowserProvider, Contract, formatUnits } from "ethers";
 import { ChainIntegrationError, normalizeChainError } from "./chainErrors";
 
-declare global {
-  interface Window {
-    ethereum?: {
-      request: (payload: { method: string; params?: unknown[] }) => Promise<unknown>;
-    };
-  }
-}
-
 const HELA_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || "666888");
 const HELA_CHAIN_ID_HEX = `0x${HELA_CHAIN_ID.toString(16)}`;
+const DEFAULT_HELA_RPC = "https://testnet-rpc.helachain.com";
 
 const ERC20_ABI = [
   "function approve(address spender, uint256 value) returns (bool)",
@@ -23,7 +16,18 @@ function getEthereum() {
   if (typeof window === "undefined" || !window.ethereum) {
     throw new ChainIntegrationError("wallet_not_found", "MetaMask wallet not found");
   }
+  if (window.ethereum.isMetaMask === false) {
+    throw new ChainIntegrationError("wallet_not_found", "Please use MetaMask wallet");
+  }
   return window.ethereum;
+}
+
+function getHeLaRpcUrl() {
+  return process.env.NEXT_PUBLIC_HELA_RPC || process.env.NEXT_PUBLIC_HELA_RPC_URL || DEFAULT_HELA_RPC;
+}
+
+function getHLUSDTokenAddress() {
+  return process.env.NEXT_PUBLIC_HLUSD_ADDRESS || process.env.NEXT_PUBLIC_HLUSD_TOKEN_ADDRESS;
 }
 
 export async function connectWallet(): Promise<string> {
@@ -70,7 +74,7 @@ export async function switchToHeLaNetwork() {
               symbol: "HLUSD",
               decimals: 18
             },
-            rpcUrls: [process.env.NEXT_PUBLIC_HELA_RPC || "https://testnet-rpc.helachain.com"]
+            rpcUrls: [getHeLaRpcUrl()]
           }
         ]
       });
@@ -94,9 +98,12 @@ export async function ensureHeLaNetwork() {
 
 export async function getHLUSDBalance(address: string) {
   try {
-    const token = process.env.NEXT_PUBLIC_HLUSD_ADDRESS;
+    const token = getHLUSDTokenAddress();
     if (!token) {
-      throw new ChainIntegrationError("missing_env", "Missing NEXT_PUBLIC_HLUSD_ADDRESS");
+      throw new ChainIntegrationError(
+        "missing_env",
+        "Missing NEXT_PUBLIC_HLUSD_ADDRESS or NEXT_PUBLIC_HLUSD_TOKEN_ADDRESS"
+      );
     }
 
     const provider = new BrowserProvider(getEthereum() as never);
@@ -111,9 +118,12 @@ export async function getHLUSDBalance(address: string) {
 
 export async function approveHLUSD(spender: string, amount: bigint) {
   try {
-    const token = process.env.NEXT_PUBLIC_HLUSD_ADDRESS;
+    const token = getHLUSDTokenAddress();
     if (!token) {
-      throw new ChainIntegrationError("missing_env", "Missing NEXT_PUBLIC_HLUSD_ADDRESS");
+      throw new ChainIntegrationError(
+        "missing_env",
+        "Missing NEXT_PUBLIC_HLUSD_ADDRESS or NEXT_PUBLIC_HLUSD_TOKEN_ADDRESS"
+      );
     }
 
     const provider = new BrowserProvider(getEthereum() as never);

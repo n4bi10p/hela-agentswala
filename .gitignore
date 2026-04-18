@@ -3,6 +3,8 @@ artifacts
 cache
 coverage
 typechain-types
+.next
+.runtime
 .env
 .env.local
 dist

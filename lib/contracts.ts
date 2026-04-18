@@ -26,14 +26,6 @@ export type TxResult = {
   status: "success" | "reverted" | "unknown";
 };
 
-declare global {
-  interface Window {
-    ethereum?: {
-      request: (payload: { method: string; params?: unknown[] }) => Promise<unknown>;
-    };
-  }
-}
-
 const AGENT_REGISTRY_ABI = [
   "function publishAgent(string name,string description,string agentType,uint256 priceHLUSD,string configSchema) returns (uint256)",
   "function getAgent(uint256 id) view returns ((uint256 id,string name,string description,string agentType,uint256 priceHLUSD,address developer,bool isActive,string configSchema))",

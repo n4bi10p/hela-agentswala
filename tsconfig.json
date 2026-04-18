@@ -10,7 +10,44 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "types": ["node", "hardhat"]
+    "types": [
+      "node",
+      "hardhat"
+    ],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "noEmit": true,
+    "incremental": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
   },
-  "include": ["hardhat.config.ts", "scripts", "lib"]
+  "include": [
+    "next-env.d.ts",
+    "hardhat.config.ts",
+    "app",
+    "components",
+    "contracts",
+    "scripts",
+    "lib",
+    "types",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

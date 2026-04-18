@@ -117,7 +117,7 @@ function parseInput(body: unknown): FarmingInput {
   };
 }
 
-export async function runFarmingAgent(input: FarmingInput): Promise<FarmingResult> {
+async function runFarmingAgent(input: FarmingInput): Promise<FarmingResult> {
   const shouldCompound = input.currentAPY >= input.compoundThreshold;
   const simulatedYield = Number((input.currentAPY * 1.015).toFixed(2));
 

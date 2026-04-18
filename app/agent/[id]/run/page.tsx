@@ -5,15 +5,40 @@ import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
 import { useParams } from "next/navigation";
 
-const AGENT_DETAILS: Record<string, { name: string; type: string; placeholder: string }> = {
+type BackendAgentType = "content" | "business";
+
+type StoredAgentConfig = Record<string, string>;
+type ConfigJson = Record<string, unknown>;
+const REQUEST_TIMEOUT_MS = 30000;
+
+type ContentRouteResponse = {
+  replies?: string[];
+  error?: string;
+};
+
+type BusinessRouteResponse = {
+  response?: string;
+  error?: string;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+const AGENT_DETAILS: Record<
+  string,
+  { name: string; type: string; backendType: BackendAgentType; placeholder: string }
+> = {
   "3": {
     name: "Social Sentinel",
     type: "CONTENT",
+    backendType: "content",
     placeholder: "Paste the message you received...",
   },
   "7": {
     name: "Business Assistant",
     type: "BUSINESS",
+    backendType: "business",
     placeholder: "Ask your question or describe the task...",
   },
 };
@@ -26,6 +51,212 @@ interface Message {
   options?: string[];
 }
 
+function createMessageId(): string {
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizeTone(value: string): "professional" | "casual" | "aggressive" {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "casual" || normalized === "aggressive") {
+    return normalized;
+  }
+  return "professional";
+}
+
+function normalizeFormality(value: string): "formal" | "informal" {
+  return value.trim().toLowerCase() === "informal" ? "informal" : "formal";
+}
+
+function tryParseJson(value: string): unknown | null {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function parseDelimitedMap(value: string): Record<string, unknown> | null {
+  if (!value.includes(":")) {
+    return null;
+  }
+
+  const result: Record<string, unknown> = {};
+  const segments = value
+    .split(",")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+
+  if (!segments.length) {
+    return null;
+  }
+
+  for (const segment of segments) {
+    const [rawKey, rawValue] = segment.split(":");
+    const key = rawKey?.trim();
+    const val = rawValue?.trim();
+    if (!key || !val) {
+      continue;
+    }
+
+    const numericCandidate = Number(val.replace("%", "").trim());
+    result[key] = Number.isFinite(numericCandidate) ? numericCandidate : val;
+  }
+
+  return Object.keys(result).length ? result : null;
+}
+
+function parseConfigValue(rawValue: string): unknown {
+  const value = rawValue.trim();
+
+  if (!value) {
+    return "";
+  }
+
+  const lower = value.toLowerCase();
+  if (lower === "true") {
+    return true;
+  }
+  if (lower === "false") {
+    return false;
+  }
+
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && /^[+-]?\d+(\.\d+)?$/.test(value.replace("%", ""))) {
+    return value.endsWith("%") ? Number(value.replace("%", "")) : numeric;
+  }
+
+  const parsedJson = tryParseJson(value);
+  if (parsedJson !== null) {
+    return parsedJson;
+  }
+
+  const parsedMap = parseDelimitedMap(value);
+  if (parsedMap) {
+    return parsedMap;
+  }
+
+  return value;
+}
+
+function buildConfigJson(config: StoredAgentConfig): ConfigJson {
+  const normalized: ConfigJson = {};
+
+  for (const [key, rawValue] of Object.entries(config)) {
+    const trimmed = rawValue.trim();
+    if (!trimmed) {
+      continue;
+    }
+    normalized[key] = parseConfigValue(trimmed);
+  }
+
+  return normalized;
+}
+
+function getStoredAgentConfig(agentId: string): StoredAgentConfig {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  const raw = window.localStorage.getItem(`agent-config-${agentId}`);
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object") {
+      return parsed as StoredAgentConfig;
+    }
+  } catch {
+    // Ignore malformed local config and fall back to defaults.
+  }
+
+  return {};
+}
+
+async function postJson<TResponse>(url: string, payload: Record<string, unknown>): Promise<TResponse> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    const raw = await response.text();
+    let parsed: unknown = {};
+
+    if (raw.trim()) {
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        if (!response.ok) {
+          throw new Error(`Request failed (${response.status}).`);
+        }
+        throw new Error("Backend returned a non-JSON response.");
+      }
+    }
+
+    if (!response.ok) {
+      const errorMessage = isRecord(parsed) && typeof parsed.error === "string"
+        ? parsed.error
+        : `Request failed (${response.status}).`;
+      throw new Error(errorMessage);
+    }
+
+    return parsed as TResponse;
+  } catch (error: unknown) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Request timed out. Please try again.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function callContentAgent(message: string, config: StoredAgentConfig): Promise<string[]> {
+  const configJson = buildConfigJson(config);
+  const payload = {
+    message,
+    tone: normalizeTone(config["Tone"] || "professional"),
+    brandContext: (config["Brand Context"] || "General brand communication context").trim(),
+    frontendConfigText: JSON.stringify(configJson),
+  };
+
+  const data = await postJson<ContentRouteResponse>("/api/agents/content", payload);
+
+  if (!Array.isArray(data.replies) || data.replies.length === 0) {
+    throw new Error("Content agent returned no reply options.");
+  }
+
+  return data.replies;
+}
+
+async function callBusinessAgent(query: string, config: StoredAgentConfig): Promise<string> {
+  const configJson = buildConfigJson(config);
+  const payload = {
+    query,
+    businessContext: (config["Industry Context"] || config["Business Type"] || "General business context").trim(),
+    language: (config["Response Language"] || "English").trim(),
+    formality: normalizeFormality(config["Formality"] || "formal"),
+    frontendConfigText: JSON.stringify(configJson),
+  };
+
+  const data = await postJson<BusinessRouteResponse>("/api/agents/business", payload);
+
+  if (!data.response || typeof data.response !== "string") {
+    throw new Error("Business agent returned an empty response.");
+  }
+
+  return data.response;
+}
+
 export default function AgentRunPage() {
   const params = useParams();
   const agentId = params.id as string;
@@ -34,6 +265,7 @@ export default function AgentRunPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -66,13 +298,17 @@ export default function AgentRunPage() {
   }
 
   const handleSendMessage = async () => {
-    if (!inputValue.trim()) return;
+    if (!inputValue.trim() || isLoading) {
+      return;
+    }
+
+    const prompt = inputValue.trim();
 
     // Add user message
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: createMessageId(),
       type: "user",
-      content: inputValue,
+      content: prompt,
       timestamp: new Date(),
     };
 
@@ -80,45 +316,59 @@ export default function AgentRunPage() {
     setInputValue("");
     setIsLoading(true);
 
-    // Simulate API call to Gemini/agent backend
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    try {
+      const storedConfig = getStoredAgentConfig(agentId);
 
-    // Add assistant response
-    let assistantContent = "";
-    let options: string[] | undefined = undefined;
+      if (agent.backendType === "content") {
+        const replies = await callContentAgent(prompt, storedConfig);
+        const assistantMessage: Message = {
+          id: createMessageId(),
+          type: "assistant",
+          content:
+            "Generated response options from the content agent. Pick one and send, or ask for another set.",
+          timestamp: new Date(),
+          options: replies.slice(0, 3),
+        };
 
-    if (agent.type === "CONTENT") {
-      assistantContent =
-        "I've generated 3 response options based on your message. Pick the one that best fits your tone!";
-      options = [
-        "That's great! Thanks for the update. Would love to discuss further.",
-        "Thanks for reaching out! Let's connect soon to talk more.",
-        "Appreciate you! Hit me up when you have a chance to chat.",
-      ];
-    } else {
-      assistantContent =
-        "Based on your query, here's my analysis:\n\nYour business question shows strong strategic thinking. I'd recommend:\n\n1. Focus on customer retention first\n2. Optimize your current processes\n3. Consider market expansion in Q2\n\nLet me know if you need more details on any of these points.";
+        setMessages((prev) => [...prev, assistantMessage]);
+      } else {
+        const response = await callBusinessAgent(prompt, storedConfig);
+        const assistantMessage: Message = {
+          id: createMessageId(),
+          type: "assistant",
+          content: response,
+          timestamp: new Date(),
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Agent execution failed.";
+      const assistantMessage: Message = {
+        id: createMessageId(),
+        type: "assistant",
+        content: `Request failed: ${errorMessage}`,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+    } finally {
+      setIsLoading(false);
     }
-
-    const assistantMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      type: "assistant",
-      content: assistantContent,
-      timestamp: new Date(),
-      options: options,
-    };
-
-    setMessages((prev) => [...prev, assistantMessage]);
-    setIsLoading(false);
   };
 
   const handleSelectOption = (option: string) => {
     setInputValue(option);
   };
 
-  const handleCopyOption = (option: string) => {
-    navigator.clipboard.writeText(option);
-    alert("Copied to clipboard!");
+  const handleCopyOption = async (option: string) => {
+    try {
+      await navigator.clipboard.writeText(option);
+      setCopyMessage("Response copied.");
+      setTimeout(() => setCopyMessage(null), 1500);
+    } catch {
+      setCopyMessage("Copy failed. Please copy manually.");
+      setTimeout(() => setCopyMessage(null), 2000);
+    }
   };
 
   return (
@@ -267,6 +517,12 @@ export default function AgentRunPage() {
               <p className="text-white/40 font-mono text-xs">
                 Tip: Press Ctrl+Enter to send
               </p>
+
+              {copyMessage && (
+                <p className="text-white/70 font-mono text-xs uppercase">
+                  {copyMessage}
+                </p>
+              )}
             </div>
           </div>
         </div>

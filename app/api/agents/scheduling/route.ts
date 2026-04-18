@@ -128,7 +128,7 @@ function parseInput(body: unknown): SchedulingInput {
   };
 }
 
-export function runSchedulingAgent(input: SchedulingInput): SchedulingResult {
+function runSchedulingAgent(input: SchedulingInput): SchedulingResult {
   const start = new Date(input.startDate);
   if (Number.isNaN(start.getTime())) {
     throw { statusCode: 400, message: "startDate must be a valid ISO date string." };

@@ -8,6 +8,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const GEMINI_MODEL = "gemini-2.5-flash";
 const RETRY_DELAY_MS = 2000;
+const GEMINI_TIMEOUT_MS = 25000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -42,10 +43,33 @@ function isRateLimitError(error: unknown): boolean {
   return false;
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+}
+
 async function generate(model: ReturnType<GoogleGenerativeAI["getGenerativeModel"]>, prompt: string): Promise<string> {
-  const response = await model.generateContent({
-    contents: [{ role: "user", parts: [{ text: prompt }] }]
-  });
+  const response = await withTimeout(
+    model.generateContent({
+      contents: [{ role: "user", parts: [{ text: prompt }] }]
+    }),
+    GEMINI_TIMEOUT_MS,
+    "Gemini request"
+  );
 
   const text = response.response.text();
   if (!text || !text.trim()) {

@@ -7,6 +7,7 @@ type ContentInput = {
   message: string;
   tone: Tone;
   brandContext: string;
+  frontendConfig?: Record<string, unknown>;
 };
 
 type ContentResult = {
@@ -17,6 +18,10 @@ type RouteError = {
   statusCode?: number;
   message?: string;
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function humanizeFieldName(field: string): string {
   const withoutPrefix = field.replace(/^payload\./, "");
@@ -63,6 +68,9 @@ function toNaturalLanguageError(status: number, rawMessage: string | undefined, 
   if (message === "tone must be professional, casual, or aggressive.") {
     return "Please set tone to professional, casual, or aggressive.";
   }
+  if (message === "frontendConfigText must be a valid JSON object.") {
+    return "Configuration payload is invalid. Please reactivate the agent configuration and try again.";
+  }
 
   const requiredMatch = message.match(/^(.+) is required\.$/);
   if (requiredMatch) {
@@ -77,12 +85,36 @@ function toNaturalLanguageError(status: number, rawMessage: string | undefined, 
   return "Please review your request and try again.";
 }
 
+function parseFrontendConfig(value: unknown): Record<string, unknown> | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  if (isRecord(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (!isRecord(parsed)) {
+        throw new Error();
+      }
+      return parsed;
+    } catch {
+      throw { statusCode: 400, message: "frontendConfigText must be a valid JSON object." };
+    }
+  }
+
+  throw { statusCode: 400, message: "frontendConfigText must be a valid JSON object." };
+}
+
 function parseInput(body: unknown): ContentInput {
   if (!body || typeof body !== "object") {
     throw { statusCode: 400, message: "Request body must be a JSON object." };
   }
 
-  const input = body as Partial<ContentInput>;
+  const input = body as Partial<ContentInput> & { frontendConfigText?: unknown };
   if (!input.message || typeof input.message !== "string") {
     throw { statusCode: 400, message: "message is required." };
   }
@@ -96,7 +128,8 @@ function parseInput(body: unknown): ContentInput {
   return {
     message: input.message.trim(),
     brandContext: input.brandContext.trim(),
-    tone: input.tone as Tone
+    tone: input.tone as Tone,
+    frontendConfig: parseFrontendConfig(input.frontendConfigText)
   };
 }
 
@@ -119,7 +152,7 @@ function parseReplies(raw: string): [string, string, string] {
   return [parsed[0].trim(), parsed[1].trim(), parsed[2].trim()];
 }
 
-export async function runContentAgent(input: ContentInput): Promise<ContentResult> {
+async function runContentAgent(input: ContentInput): Promise<ContentResult> {
   const systemContext = [
     "You are an expert social media response assistant.",
     "You must return exactly one JSON array with 3 strings and no extra text.",
@@ -130,6 +163,9 @@ export async function runContentAgent(input: ContentInput): Promise<ContentResul
   const prompt = [
     `Incoming message: ${input.message}`,
     `Brand context: ${input.brandContext}`,
+    input.frontendConfig
+      ? `Frontend configuration JSON: ${JSON.stringify(input.frontendConfig)}`
+      : "Frontend configuration JSON: {}",
     "Return output as JSON only, like:",
     '["Reply 1", "Reply 2", "Reply 3"]'
   ].join("\n");

@@ -3,6 +3,9 @@
 import { TopNavBar } from "@/components/TopNavBar";
 import Link from "next/link";
 import { useState } from "react";
+import { BrowserProvider } from "ethers";
+import type { AgentObject } from "@/types/agent";
+import { connectWallet, ensureHeLaNetwork } from "@/lib/wallet";
 
 const AGENT_TYPES = [
   "TRADING",
@@ -13,6 +16,39 @@ const AGENT_TYPES = [
   "BUSINESS",
 ];
 
+type GenerateRouteResponse = {
+  agent?: AgentObject;
+  executionCode?: string;
+  ready?: boolean;
+  error?: string;
+};
+
+type DeployRouteResponse = {
+  agentId?: string;
+  txHash?: string;
+  explorerUrl?: string;
+  marketplaceUrl?: string;
+  deployed?: boolean;
+  error?: string;
+  details?: string;
+};
+
+type PublishStage = "idle" | "generating" | "signing" | "deploying";
+
+function normalizeAgentType(value: string): AgentObject["agentType"] {
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "trading" ||
+    normalized === "farming" ||
+    normalized === "scheduling" ||
+    normalized === "rebalancing" ||
+    normalized === "content"
+  ) {
+    return normalized;
+  }
+  return "business";
+}
+
 export default function PublishPage() {
   const [formData, setFormData] = useState({
     name: "",
@@ -22,7 +58,11 @@ export default function PublishPage() {
     configSchema: "",
   });
 
-  const [isPublishing, setIsPublishing] = useState(false);
+  const [publishStage, setPublishStage] = useState<PublishStage>("idle");
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [publishResult, setPublishResult] = useState<DeployRouteResponse | null>(null);
+
+  const isPublishing = publishStage !== "idle";
 
   const handleInputChange = (
     field: string,
@@ -42,27 +82,96 @@ export default function PublishPage() {
       !formData.agentType ||
       !formData.price
     ) {
-      alert("Please fill in all required fields");
+      setPublishError("Please fill in all required fields.");
       return;
     }
 
-    setIsPublishing(true);
-    // Simulate API call and contract interaction
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    setIsPublishing(false);
+    try {
+      setPublishError(null);
+      setPublishResult(null);
 
-    alert(
-      `Agent "${formData.name}" published successfully! Transaction pending confirmation on HeLa Chain.`
-    );
+      setPublishStage("generating");
+      const prompt = [
+        `Create an AI agent for marketplace publishing.`,
+        `Agent name: ${formData.name.trim()}`,
+        `Description: ${formData.description.trim()}`,
+        `Preferred type: ${formData.agentType.trim().toLowerCase()}`,
+        `Target price in HLUSD: ${formData.price.trim()}`,
+        formData.configSchema.trim()
+          ? `Configuration schema hints: ${formData.configSchema.trim()}`
+          : "Configuration schema hints: include practical buyer input fields."
+      ].join("\n");
 
-    // Reset form
-    setFormData({
-      name: "",
-      description: "",
-      agentType: "",
-      price: "",
-      configSchema: "",
-    });
+      const generateResponse = await fetch("/api/agents/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ prompt }),
+      });
+
+      const generateData = (await generateResponse.json()) as GenerateRouteResponse;
+      if (!generateResponse.ok || !generateData.agent || !generateData.executionCode) {
+        throw new Error(generateData.error || "Failed to generate deployable agent payload.");
+      }
+
+      const normalizedPrice = Number(formData.price);
+      const agentToDeploy: AgentObject = {
+        ...generateData.agent,
+        name: formData.name.trim(),
+        description: formData.description.trim(),
+        agentType: normalizeAgentType(formData.agentType),
+        priceHLUSD: Number.isFinite(normalizedPrice) && normalizedPrice > 0
+          ? normalizedPrice
+          : generateData.agent.priceHLUSD,
+      };
+
+      setPublishStage("signing");
+      if (typeof window === "undefined" || !window.ethereum) {
+        throw new Error("MetaMask wallet not found. Please install or unlock MetaMask.");
+      }
+
+      const walletAddress = await connectWallet();
+      await ensureHeLaNetwork();
+
+      const provider = new BrowserProvider(window.ethereum as never);
+      const signer = await provider.getSigner();
+      const developerAddress = (await signer.getAddress()) || walletAddress;
+      const signature = await signer.signMessage(`Deploy agent: ${agentToDeploy.name}`);
+
+      setPublishStage("deploying");
+      const deployResponse = await fetch("/api/agents/deploy", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          agent: agentToDeploy,
+          executionCode: generateData.executionCode,
+          developerAddress,
+          signature,
+        }),
+      });
+
+      const deployData = (await deployResponse.json()) as DeployRouteResponse;
+      if (!deployResponse.ok || !deployData.deployed) {
+        throw new Error(deployData.error || deployData.details || "Deployment failed.");
+      }
+
+      setPublishResult(deployData);
+      setFormData({
+        name: "",
+        description: "",
+        agentType: "",
+        price: "",
+        configSchema: "",
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Publishing failed.";
+      setPublishError(message);
+    } finally {
+      setPublishStage("idle");
+    }
   };
 
   return (
@@ -201,7 +310,13 @@ export default function PublishPage() {
               disabled={isPublishing}
               className="flex-1 bg-white text-black py-4 font-headline text-xl hover:bg-black hover:text-white border border-white transition-colors disabled:opacity-50 uppercase"
             >
-              {isPublishing ? "PUBLISHING..." : "[ PUBLISH ↗ ]"}
+              {publishStage === "generating"
+                ? "GENERATING..."
+                : publishStage === "signing"
+                  ? "SIGNING..."
+                  : publishStage === "deploying"
+                    ? "DEPLOYING..."
+                    : "[ PUBLISH ↗ ]"}
             </button>
 
             <Link
@@ -211,6 +326,30 @@ export default function PublishPage() {
               [ BACK ↗ ]
             </Link>
           </div>
+
+          {publishError && (
+            <div className="border border-red-500/60 bg-red-500/10 p-4">
+              <p className="font-mono text-xs text-red-200 uppercase">{publishError}</p>
+            </div>
+          )}
+
+          {publishResult?.deployed && (
+            <div className="border border-white/20 bg-white/5 p-4 flex flex-col gap-2">
+              <p className="font-mono text-xs text-white/70 uppercase">Deployment Successful</p>
+              <p className="font-body text-sm text-white">Agent ID: {publishResult.agentId}</p>
+              <p className="font-body text-sm text-white break-all">Tx: {publishResult.txHash}</p>
+              {publishResult.explorerUrl && (
+                <a
+                  href={publishResult.explorerUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-mono text-xs text-white/70 hover:text-white uppercase"
+                >
+                  [ VIEW ON EXPLORER ↗ ]
+                </a>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </main>
