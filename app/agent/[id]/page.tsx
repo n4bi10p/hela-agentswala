@@ -2,6 +2,7 @@
 
 import { TopNavBar } from "@/components/TopNavBar";
 import Link from "next/link";
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { connectWallet, ensureHeLaNetwork, getConnectedAccount } from "@/lib/wallet";
@@ -1165,8 +1166,8 @@ export default function AgentDetailPage() {
 
       <div className="mx-auto mt-24 grid max-w-7xl grid-cols-1 gap-8 p-8 lg:grid-cols-3">
         <div className="flex flex-col gap-6 lg:col-span-1">
-          <div className="h-96 w-full overflow-hidden border border-white/12 bg-surface-container-lowest">
-            <img src={agent.image} alt={agent.name} className="h-full w-full object-cover" />
+          <div className="relative h-96 w-full overflow-hidden border border-white/12 bg-surface-container-lowest">
+            <Image src={agent.image} alt={agent.name} fill className="object-cover" sizes="(max-width: 1024px) 100vw, 33vw" />
           </div>
 
           <div className="flex flex-col gap-4 border border-white/12 p-6">
