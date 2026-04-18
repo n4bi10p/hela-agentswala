@@ -22,12 +22,47 @@ type AgentListItem = {
   developer: string;
 };
 
+const CANONICAL_AGENT_NAMES: Record<string, string> = {
+  trading: "Trading Agent",
+  farming: "Farming Agent",
+  scheduling: "Scheduling Agent",
+  rebalancing: "Portfolio Rebalancing Agent",
+  content: "Content Reply Agent",
+  business: "Business Assistant Agent"
+};
+
+const MARKETPLACE_EXCLUDED_NAME_PATTERNS: RegExp[] = [
+  /\bdemo\b/i,
+  /\bguided\b/i,
+  /\btechnical\b/i,
+  /\bbackend\b/i,
+  /\bname\s+suggest(?:or|er)?\b/i,
+  /\bname\s+creator\b/i,
+  /\bbaby\b/i,
+  /\bpet\b/i
+];
+
 function toPrice(priceWei: bigint): number {
   const parsed = Number(formatUnits(priceWei, 18));
   if (!Number.isFinite(parsed)) {
     return 0;
   }
   return Number(parsed.toFixed(6));
+}
+
+function isMarketplaceExcluded(agent: AgentListItem) {
+  return MARKETPLACE_EXCLUDED_NAME_PATTERNS.some((pattern) => pattern.test(agent.name));
+}
+
+function getMarketplacePriority(agent: AgentListItem): number {
+  const normalizedType = agent.agentType.trim().toLowerCase();
+  const canonicalName = CANONICAL_AGENT_NAMES[normalizedType];
+
+  if (canonicalName && agent.name.trim().toLowerCase() === canonicalName.toLowerCase()) {
+    return 100;
+  }
+
+  return 10;
 }
 
 export async function GET() {
@@ -44,7 +79,7 @@ export async function GET() {
       })
     );
 
-    const response: AgentListItem[] = agents
+    const mappedAgents: AgentListItem[] = agents
       .map((agent, index) => ({
         id: Number(agent.id),
         name: agent.name,
@@ -59,9 +94,35 @@ export async function GET() {
         developer: agent.developer
       }))
       .filter((agent) => !isHiddenAgentName(agent.name))
-      .sort((left, right) => right.id - left.id);
+      .filter((agent) => !isMarketplaceExcluded(agent));
 
-    return NextResponse.json({ agents: response }, { status: 200 });
+    const curatedByType = Array.from(
+      mappedAgents.reduce<Map<string, AgentListItem>>((acc, agent) => {
+        const key = agent.agentType.trim().toLowerCase();
+        const current = acc.get(key);
+
+        if (!current) {
+          acc.set(key, agent);
+          return acc;
+        }
+
+        const currentPriority = getMarketplacePriority(current);
+        const nextPriority = getMarketplacePriority(agent);
+
+        if (
+          nextPriority > currentPriority ||
+          (nextPriority === currentPriority && agent.activeCount > current.activeCount) ||
+          (nextPriority === currentPriority && agent.activeCount === current.activeCount && agent.id < current.id)
+        ) {
+          acc.set(key, agent);
+        }
+
+        return acc;
+      }, new Map<string, AgentListItem>())
+        .values()
+    ).sort((left, right) => left.id - right.id);
+
+    return NextResponse.json({ agents: curatedByType }, { status: 200 });
   } catch {
     return NextResponse.json({ error: "Failed to fetch agents." }, { status: 500 });
   }

@@ -11,12 +11,14 @@
     "compile": "hardhat compile",
     "test": "hardhat test",
     "deploy:hlusd-demo": "hardhat run scripts/deployDemoHlusd.ts --network helaTestnet",
+    "deploy:farming-demo": "hardhat run --no-compile scripts/deployDemoFarmingInfra.js --network helaTestnet",
     "deploy:trading-demo": "hardhat run --no-compile scripts/deployDemoTradingInfra.js --network helaTestnet",
     "deploy:local": "hardhat run scripts/deploy.ts --network hardhat",
     "deploy:hela": "hardhat run scripts/deploy.ts --network helaTestnet",
     "seed:hela": "hardhat run scripts/seed.ts --network helaTestnet",
     "activate:hela": "hardhat run scripts/activateDemo.ts --network helaTestnet",
     "automation:run": "ts-node scripts/automationWorker.ts",
+    "automation:watch": "AUTOMATION_WORKER_MODE=watch ts-node scripts/automationWorker.ts",
     "demo:check": "hardhat run scripts/demoCheck.ts --network helaTestnet",
     "verify:hela": "hardhat run scripts/verify.ts --network helaTestnet"
   },
@@ -26,6 +28,7 @@
   "type": "commonjs",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@openzeppelin/contracts": "^5.6.1",
     "@types/node-cron": "^3.0.11",
     "dotenv": "^17.4.2",
     "ethers": "^6.16.0",

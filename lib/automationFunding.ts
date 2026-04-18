@@ -1,5 +1,6 @@
 import type { AgentJob } from "../types/agent";
 import { fetchHLUSDBalanceForAddress, fetchNativeBalanceForAddress } from "./contracts";
+import { isRealFarmingExecutionEnabled } from "./farmingExecutor";
 import { isRealTradingExecutionEnabled } from "./tradingExecutor";
 
 export type FundingStatus = "empty" | "low" | "funded" | "unknown";
@@ -67,6 +68,50 @@ function getTradingInputToken(job: AgentJob): string | null {
   return direction === "above" ? symbols[0] : symbols[1];
 }
 
+function getRebalancingExecutionBudget(job: AgentJob): number | null {
+  if (!isRealTradingExecutionEnabled()) {
+    return null;
+  }
+
+  const targetAllocations = job.userConfig.targetAllocations ?? job.userConfig["Target Allocation"];
+  const currentAllocations = job.userConfig.currentAllocations ?? job.userConfig["Current Allocation"];
+
+  if (
+    !targetAllocations ||
+    typeof targetAllocations !== "object" ||
+    Array.isArray(targetAllocations) ||
+    !currentAllocations ||
+    typeof currentAllocations !== "object" ||
+    Array.isArray(currentAllocations)
+  ) {
+    return null;
+  }
+
+  const targetSymbols = Object.keys(targetAllocations as Record<string, unknown>).map((symbol) => symbol.toUpperCase());
+  const currentSymbols = Object.keys(currentAllocations as Record<string, unknown>).map((symbol) => symbol.toUpperCase());
+  const symbols = Array.from(new Set([...targetSymbols, ...currentSymbols]));
+
+  if (!symbols.includes("HLUSD") || !symbols.includes("DUSDC")) {
+    return null;
+  }
+
+  const budget = typeof job.executionPolicy?.maxSpendPerRunHLUSD === "number" ? job.executionPolicy.maxSpendPerRunHLUSD : 1;
+  return Number.isFinite(budget) && budget > 0 ? budget : 1;
+}
+
+function getFarmingExecutionBudget(job: AgentJob): number | null {
+  if (!isRealFarmingExecutionEnabled()) {
+    return null;
+  }
+
+  const protocol = readText(job, ["protocol", "LP Token Address"], "").toLowerCase();
+  if (protocol !== "demo-farm") {
+    return null;
+  }
+
+  return readNumber(job, ["amount", "Threshold"], 1);
+}
+
 function requiresNativeGas(job: AgentJob, agentType: string | null): boolean {
   if (agentType === "scheduling") {
     return true;
@@ -87,6 +132,14 @@ function requiresNativeGas(job: AgentJob, agentType: string | null): boolean {
     return action === "simulate-swap";
   }
 
+  if (agentType === "rebalancing" && getRebalancingExecutionBudget(job) !== null) {
+    return true;
+  }
+
+  if (agentType === "farming" && getFarmingExecutionBudget(job) !== null) {
+    return true;
+  }
+
   return false;
 }
 
@@ -102,8 +155,12 @@ function getRecommendedMinimum(job: AgentJob, agentType: string | null): number 
     return 0;
   }
 
-  if (agentType === "farming" || agentType === "rebalancing") {
-    return 0;
+  if (agentType === "rebalancing") {
+    return getRebalancingExecutionBudget(job) ?? 0;
+  }
+
+  if (agentType === "farming") {
+    return getFarmingExecutionBudget(job) ?? 0;
   }
 
   if (agentType === "scheduling") {
@@ -122,7 +179,7 @@ function toDisplayAmount(value: number | null) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
-const MIN_NATIVE_GAS_BALANCE = 0.0001;
+const MIN_NATIVE_GAS_BALANCE = 0.01;
 
 export async function getFundingSnapshot(
   agentWalletAddress: string | null,

@@ -27,6 +27,17 @@ export type TradingSwapResult = {
   txHash: string;
 };
 
+export type TokenSwapResult = {
+  routerAddress: string;
+  routerKind: SupportedRouterKind;
+  inputTokenSymbol: string;
+  outputTokenSymbol: string;
+  inputAmount: string;
+  quotedOutputAmount: string;
+  minimumOutputAmount: string;
+  txHash: string;
+};
+
 function requireEnv(name: string) {
   const value = process.env[name];
   if (!value) {
@@ -110,13 +121,13 @@ export function isRealTradingExecutionEnabled() {
   return (process.env.TRADING_REAL_EXECUTION_ENABLED || "").trim().toLowerCase() === "true";
 }
 
-export async function executeTradingSwap(input: {
+async function executeConfiguredSwap(input: {
   agentWalletPrivateKey: string;
-  tokenPair: string;
-  direction: TradingDirection;
+  inputTokenSymbol: string;
+  outputTokenSymbol: string;
   amount: number;
   slippageBps: number;
-}): Promise<TradingSwapResult> {
+}): Promise<TokenSwapResult> {
   if (!isRealTradingExecutionEnabled()) {
     throw new Error("Real trading execution is disabled");
   }
@@ -131,12 +142,13 @@ export async function executeTradingSwap(input: {
     throw new Error("Trading swap amount must be greater than zero");
   }
 
-  const { inputTokenSymbol, outputTokenSymbol, strategy } = getPathSymbols(input.tokenPair, input.direction);
+  const inputTokenSymbol = input.inputTokenSymbol.trim().toUpperCase();
+  const outputTokenSymbol = input.outputTokenSymbol.trim().toUpperCase();
   const inputTokenAddress = tokenAddressMap[inputTokenSymbol];
   const outputTokenAddress = tokenAddressMap[outputTokenSymbol];
 
   if (!inputTokenAddress || !outputTokenAddress) {
-    throw new Error(`Unsupported trading pair for real execution: ${input.tokenPair}`);
+    throw new Error(`Unsupported trading pair for real execution: ${inputTokenSymbol}/${outputTokenSymbol}`);
   }
 
   const provider = new JsonRpcProvider(rpcUrl);
@@ -181,12 +193,43 @@ export async function executeTradingSwap(input: {
   return {
     routerAddress,
     routerKind,
-    strategy,
     inputTokenSymbol,
     outputTokenSymbol,
     inputAmount: formatUnits(amountIn, Number(inputDecimals)),
     quotedOutputAmount: formatUnits(quotedOutput, Number(outputDecimals)),
     minimumOutputAmount: formatUnits(minimumOutput, Number(outputDecimals)),
     txHash: receipt?.hash || swapTx.hash
+  };
+}
+
+export async function executeTokenSwap(input: {
+  agentWalletPrivateKey: string;
+  inputTokenSymbol: string;
+  outputTokenSymbol: string;
+  amount: number;
+  slippageBps: number;
+}): Promise<TokenSwapResult> {
+  return executeConfiguredSwap(input);
+}
+
+export async function executeTradingSwap(input: {
+  agentWalletPrivateKey: string;
+  tokenPair: string;
+  direction: TradingDirection;
+  amount: number;
+  slippageBps: number;
+}): Promise<TradingSwapResult> {
+  const { inputTokenSymbol, outputTokenSymbol, strategy } = getPathSymbols(input.tokenPair, input.direction);
+  const swap = await executeConfiguredSwap({
+    agentWalletPrivateKey: input.agentWalletPrivateKey,
+    inputTokenSymbol,
+    outputTokenSymbol,
+    amount: input.amount,
+    slippageBps: input.slippageBps
+  });
+
+  return {
+    ...swap,
+    strategy
   };
 }

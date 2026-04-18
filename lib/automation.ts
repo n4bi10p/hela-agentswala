@@ -6,7 +6,8 @@ import { callGemini } from "./gemini";
 import { getTokenPrice } from "./priceService";
 import { simulateLPPosition } from "./walletMonitor";
 import { isTemplateAutomationPlaceholder } from "./automationBootstrap";
-import { executeTradingSwap, isRealTradingExecutionEnabled } from "./tradingExecutor";
+import { executeFarmingDeposit, isRealFarmingExecutionEnabled } from "./farmingExecutor";
+import { executeTokenSwap, executeTradingSwap, isRealTradingExecutionEnabled } from "./tradingExecutor";
 import type { AgentJob, AutomationFrequency, ExecutionPolicy, ExecutionResult } from "../types/agent";
 
 const ERC20_ABI = [
@@ -234,6 +235,17 @@ function parseMap(value: unknown, fallback: Record<string, number>): Record<stri
   return fallback;
 }
 
+function getRebalancingExecutionBudget(job: AgentJob, mostOverweightDeviation: number, mostUnderweightDeviation: number): number {
+  const configuredCap =
+    typeof getExecutionPolicy(job).maxSpendPerRunHLUSD === "number"
+      ? getExecutionPolicy(job).maxSpendPerRunHLUSD
+      : 1;
+
+  return Number(
+    Math.max(0.1, Math.min(configuredCap, Math.abs(mostOverweightDeviation), Math.abs(mostUnderweightDeviation))).toFixed(4)
+  );
+}
+
 async function executeContentAutomation(job: AgentJob): Promise<ExecutionResult> {
   const topic = readText(job.userConfig, ["topic", "prompt", "message", "Sample Message"], "integration update");
   const tone = readText(job.userConfig, ["tone", "Tone"], "professional");
@@ -386,10 +398,43 @@ async function executeFarmingAutomation(job: AgentJob): Promise<ExecutionResult>
   const amount = readNumber(job.userConfig, ["amount", "Threshold"], 100);
   const durationDays = readNumber(job.userConfig, ["durationDays"], 30);
   enforceAllowedProtocols(job, [protocol]);
-  enforceAllowedTokens(job, poolType.split(/[/:_\-\s]+/).filter(Boolean));
+  const requiredInputTokens =
+    protocol.trim().toLowerCase() === "demo-farm" ? ["HLUSD"] : poolType.split(/[/:_\-\s]+/).filter(Boolean);
+  enforceAllowedTokens(job, requiredInputTokens);
   enforceSpendLimits(job, amount);
   const lpData = await simulateLPPosition(`${protocol}:${poolType}`);
   const projectedEarnings = Number((amount * (lpData.apy / 100) * (durationDays / 365)).toFixed(6));
+
+  if (
+    isRealFarmingExecutionEnabled() &&
+    protocol.trim().toLowerCase() === "demo-farm" &&
+    !isTemplateAutomationPlaceholder(job.agentId)
+  ) {
+    const storedAgent = getStoredAgent(job.agentId);
+    if (storedAgent) {
+      const deposit = await executeFarmingDeposit({
+        agentWalletPrivateKey: storedAgent.agentWalletPrivateKey,
+        poolKey: poolType,
+        amount
+      });
+
+      return {
+        success: true,
+        result: `Deposited ${deposit.depositAmount} HLUSD into ${deposit.poolKey}. Projected earnings: ${projectedEarnings}. Estimated spend: ${amount}.`,
+        data: {
+          protocol,
+          poolType,
+          projectedEarnings,
+          apy: lpData.apy,
+          amount,
+          stakedBalance: deposit.stakedBalance,
+          executionMode: "real-farm-deposit"
+        },
+        txHash: deposit.txHash,
+        executedAt: new Date().toISOString()
+      };
+    }
+  }
 
   return {
     success: true,
@@ -429,13 +474,89 @@ async function executeRebalancingAutomation(job: AgentJob): Promise<ExecutionRes
       return total + (Number.isFinite(amount) ? amount : 0);
     }, 0).toFixed(4)
   );
+
+  if (!requiredTrades.length) {
+    return {
+      success: true,
+      result: "Portfolio is within the configured drift tolerance.",
+      data: {
+        target,
+        current,
+        driftTolerance,
+        requiredTrades,
+        estimatedSpend,
+        executionMode: "policy-guarded-rebalance-plan"
+      },
+      executedAt: new Date().toISOString()
+    };
+  }
+
+  const deviations = symbols
+    .map((symbol) => ({
+      symbol,
+      deviation: Number(((current[symbol] ?? 0) - (target[symbol] ?? 0)).toFixed(4))
+    }))
+    .filter((entry) => Math.abs(entry.deviation) > driftTolerance);
+
+  const mostOverweight = deviations
+    .filter((entry) => entry.deviation > 0)
+    .sort((left, right) => right.deviation - left.deviation)[0];
+  const mostUnderweight = deviations
+    .filter((entry) => entry.deviation < 0)
+    .sort((left, right) => left.deviation - right.deviation)[0];
+
+  const slippageBps = getExecutionPolicy(job).slippageBps ?? 100;
+  const realSwapCandidateAmount =
+    mostOverweight && mostUnderweight
+      ? getRebalancingExecutionBudget(job, mostOverweight.deviation, mostUnderweight.deviation)
+      : null;
+
+  if (
+    isRealTradingExecutionEnabled() &&
+    mostOverweight &&
+    mostUnderweight &&
+    !isTemplateAutomationPlaceholder(job.agentId)
+  ) {
+    const storedAgent = getStoredAgent(job.agentId);
+    if (storedAgent) {
+      const realSwapAmount = realSwapCandidateAmount ?? 1;
+      enforceSpendLimits(job, realSwapAmount);
+
+      const swap = await executeTokenSwap({
+        agentWalletPrivateKey: storedAgent.agentWalletPrivateKey,
+        inputTokenSymbol: mostOverweight.symbol,
+        outputTokenSymbol: mostUnderweight.symbol,
+        amount: realSwapAmount,
+        slippageBps
+      });
+
+      return {
+        success: true,
+        result: `Rebalanced portfolio by swapping ${swap.inputAmount} ${swap.inputTokenSymbol} into ${swap.outputTokenSymbol}. Estimated spend: ${realSwapAmount}.`,
+        data: {
+          target,
+          current,
+          driftTolerance,
+          requiredTrades,
+          estimatedSpend,
+          inputTokenSymbol: swap.inputTokenSymbol,
+          outputTokenSymbol: swap.outputTokenSymbol,
+          realSwapAmount,
+          quotedOutputAmount: swap.quotedOutputAmount,
+          minimumOutputAmount: swap.minimumOutputAmount,
+          executionMode: "real-rebalance-swap"
+        },
+        txHash: swap.txHash,
+        executedAt: new Date().toISOString()
+      };
+    }
+  }
+
   enforceSpendLimits(job, estimatedSpend);
 
   return {
     success: true,
-    result: requiredTrades.length
-      ? `Rebalance needed: ${requiredTrades.join(" | ")}. Estimated spend: ${estimatedSpend}.`
-      : "Portfolio is within the configured drift tolerance.",
+    result: `Rebalance needed: ${requiredTrades.join(" | ")}. Estimated spend: ${estimatedSpend}.`,
     data: {
       target,
       current,
