@@ -90,6 +90,8 @@ Status: IN PROGRESS
 
 Note: Hardhat automated verification currently fails with explorer API HTML response parsing.
 Deployment addresses are confirmed live on explorer links above.
+Demo preflight check currently fails because configured `HLUSD_ADDRESS` has no contract code on testnet.
+Fixing this address and redeploying is required before paid activation demo.
 
 Latest deployment (2026-04-18):
 - AgentRegistry: https://testnet-blockexplorer.helachain.com/address/0xB24786dB9E3DCC2Fb51A3033799AB7E7B0e05a1c
@@ -136,7 +138,7 @@ Deliverable:
 - All six agents visible and activatable in UI.
 
 ## Phase 7: E2E Demo Rehearsal
-Status: TODO
+Status: IN PROGRESS
 
 - [ ] Connect MetaMask on HeLa.
 - [ ] Browse marketplace -> open agent details.
@@ -144,7 +146,11 @@ Status: TODO
 - [ ] Capture tx hash and explorer link.
 - [ ] Run Content Reply interaction and verify log path.
 - [ ] Validate dashboard shows activations/events.
-- [ ] Record fallback procedure if RPC/tx fails live.
+- [x] Record fallback procedure if RPC/tx fails live.
+
+Implemented rehearsal tooling:
+- `npm run demo:check` for automated preflight validation (contracts, seed data, HLUSD token contract check)
+- `DEMO_RUNBOOK.md` for live demo flow + fallback playbook
 
 Deliverable:
 - Judging-ready demo with backup paths.

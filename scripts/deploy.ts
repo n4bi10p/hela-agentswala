@@ -30,6 +30,11 @@ async function main() {
   console.log("Deployer:", deployer.address);
   console.log("HLUSD:", hlusdAddress);
 
+  const hlusdCode = await ethers.provider.getCode(hlusdAddress);
+  if (hlusdCode === "0x") {
+    throw new Error("HLUSD_ADDRESS points to a non-contract account. Set the real HLUSD token contract address.");
+  }
+
   const registryFactory = await ethers.getContractFactory("AgentRegistry");
   const registry = await registryFactory.deploy();
   await registry.waitForDeployment();
