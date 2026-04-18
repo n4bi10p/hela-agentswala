@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { TopNavBar } from "@/components/TopNavBar";
 import Link from "next/link";
-import { connectWallet, ensureHeLaNetwork, getConnectedAccount } from "@/lib/wallet";
+import { connectWallet, ensureHeLaNetwork, getConnectedAccount, transferHLUSD } from "@/lib/wallet";
 
 type DashboardAgent = {
   id: number;
@@ -160,6 +160,22 @@ function getAutomationReadiness(job: AutomationJobView): {
   };
 }
 
+function getAutomationPanelClass(job: AutomationJobView): string {
+  if (job.fundingStatus === "funded" && job.gasFundingStatus === "ready") {
+    return "border-emerald-300/30 bg-emerald-300/5";
+  }
+
+  if (job.gasFundingStatus === "missing" || job.gasFundingStatus === "low") {
+    return "border-yellow-300/30 bg-yellow-300/5";
+  }
+
+  if (job.fundingStatus === "empty" || job.fundingStatus === "low") {
+    return "border-red-300/30 bg-red-300/5";
+  }
+
+  return "border-white/12 bg-white/5";
+}
+
 function formatWalletBalance(job: AutomationJobView): string {
   if (job.recommendedMinimumHLUSD === "0") {
     return "N/A (not required)";
@@ -178,6 +194,8 @@ export default function DashboardPage() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [activeJobActionId, setActiveJobActionId] = useState<string | null>(null);
   const [activeGasFundingJobId, setActiveGasFundingJobId] = useState<string | null>(null);
+  const [activeHlusdFundingJobId, setActiveHlusdFundingJobId] = useState<string | null>(null);
+  const [hlusdFundingAmounts, setHlusdFundingAmounts] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
   const runningAgentsCount = useMemo(
@@ -273,6 +291,39 @@ export default function DashboardPage() {
       setError(fundingError instanceof Error ? fundingError.message : "Failed to fund agent gas wallet.");
     } finally {
       setActiveGasFundingJobId(null);
+    }
+  };
+
+  const handleHLUSDAmountChange = (jobId: string, value: string) => {
+    setHlusdFundingAmounts((current) => ({
+      ...current,
+      [jobId]: value
+    }));
+  };
+
+  const handleFundHLUSD = async (job: AutomationJobView) => {
+    if (!job.agentWalletAddress) {
+      setError("Agent wallet address is unavailable for this job.");
+      return;
+    }
+
+    const amount = (hlusdFundingAmounts[job.id] || "5").trim();
+
+    try {
+      setActiveHlusdFundingJobId(job.id);
+      setError(null);
+
+      await ensureHeLaNetwork();
+      await connectWallet();
+      await transferHLUSD(job.agentWalletAddress, amount);
+
+      if (walletAddress) {
+        await loadDashboardForAddress(walletAddress);
+      }
+    } catch (fundingError) {
+      setError(fundingError instanceof Error ? fundingError.message : "Failed to send HLUSD to the agent wallet.");
+    } finally {
+      setActiveHlusdFundingJobId(null);
     }
   };
 
@@ -510,7 +561,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  <div className="mt-4 border border-white/12 p-4">
+                  <div className={`mt-4 border p-4 ${getAutomationPanelClass(job)}`}>
                     <div className="flex items-center justify-between gap-4">
                       <p className="font-mono text-xs uppercase text-white/60">Funding Status</p>
                       <span
@@ -546,28 +597,52 @@ export default function DashboardPage() {
                   </div>
 
                   {job.agentWalletAddress && (
-                    <div className="mt-4 flex flex-col gap-3 md:flex-row">
-                      <button
-                        onClick={() => handleCopyWalletAddress(job.agentWalletAddress!)}
-                        className="border border-white px-4 py-3 font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black"
-                      >
-                        [ COPY WALLET ADDRESS ]
-                      </button>
-                      <a
-                        href={FAUCET_URL}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="border border-white bg-white px-4 py-3 text-center font-headline text-sm uppercase text-black transition-colors hover:bg-black hover:text-white"
+                    <div className="mt-4 flex flex-col gap-3">
+                      <div className="flex flex-col gap-3 md:flex-row">
+                        <button
+                          onClick={() => handleCopyWalletAddress(job.agentWalletAddress!)}
+                          className="border border-white px-4 py-3 font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black"
                         >
-                          [ OPEN HLUSD FAUCET ↗ ]
+                          [ COPY WALLET ADDRESS ]
+                        </button>
+                        <a
+                          href={FAUCET_URL}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="border border-white bg-white px-4 py-3 text-center font-headline text-sm uppercase text-black transition-colors hover:bg-black hover:text-white"
+                        >
+                          [ OPEN GAS FAUCET ↗ ]
                         </a>
-                      <button
-                        onClick={() => handleFundGas(job.id)}
-                        disabled={activeGasFundingJobId === job.id}
-                        className="border border-white px-4 py-3 font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black disabled:opacity-50"
-                      >
-                        {activeGasFundingJobId === job.id ? "[ FUNDING GAS... ]" : "[ FUND GAS 0.02 HELA ↗ ]"}
-                      </button>
+                        <button
+                          onClick={() => handleFundGas(job.id)}
+                          disabled={activeGasFundingJobId === job.id}
+                          className="border border-white px-4 py-3 font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black disabled:opacity-50"
+                        >
+                          {activeGasFundingJobId === job.id ? "[ FUNDING GAS... ]" : "[ FUND GAS 0.02 HELA ↗ ]"}
+                        </button>
+                      </div>
+
+                      <div className="border border-white/12 p-3">
+                        <p className="font-mono text-[11px] uppercase text-white/50">Fund HLUSD From Connected Wallet</p>
+                        <div className="mt-3 flex flex-col gap-3 md:flex-row">
+                          <input
+                            type="number"
+                            min="0.1"
+                            step="0.1"
+                            value={hlusdFundingAmounts[job.id] || "5"}
+                            onChange={(event) => handleHLUSDAmountChange(job.id, event.target.value)}
+                            className="border border-white/20 bg-surface-container p-3 font-mono text-sm text-white focus:border-white focus:outline-none md:w-32"
+                            placeholder="HLUSD"
+                          />
+                          <button
+                            onClick={() => handleFundHLUSD(job)}
+                            disabled={activeHlusdFundingJobId === job.id}
+                            className="border border-white bg-white px-4 py-3 font-headline text-sm uppercase text-black transition-colors hover:bg-black hover:text-white disabled:opacity-50"
+                          >
+                            {activeHlusdFundingJobId === job.id ? "[ SENDING HLUSD... ]" : "[ SEND HLUSD ↗ ]"}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   )}
 
@@ -690,7 +765,9 @@ export default function DashboardPage() {
                     </div>
                     <p className="font-mono text-xs text-white/40">{formatRelativeTime(log.timestamp)}</p>
                   </div>
-                  <p className="font-mono text-xs text-white/80">{log.details}</p>
+                  <p className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs text-white/80 [overflow-wrap:anywhere]">
+                    {log.details}
+                  </p>
                 </div>
               ))}
             </div>

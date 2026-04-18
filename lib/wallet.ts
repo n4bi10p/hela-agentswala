@@ -1,4 +1,4 @@
-import { BrowserProvider, Contract, formatUnits } from "ethers";
+import { BrowserProvider, Contract, formatUnits, parseUnits } from "ethers";
 import { ChainIntegrationError, normalizeChainError } from "./chainErrors";
 
 declare global {
@@ -20,7 +20,8 @@ const ERC20_ABI = [
   "function approve(address spender, uint256 value) returns (bool)",
   "function allowance(address owner, address spender) view returns (uint256)",
   "function balanceOf(address account) view returns (uint256)",
-  "function decimals() view returns (uint8)"
+  "function decimals() view returns (uint8)",
+  "function transfer(address to, uint256 value) returns (bool)"
 ];
 
 function getEthereum() {
@@ -175,6 +176,30 @@ export async function approveHLUSD(spender: string, amount: bigint) {
     return tx.wait();
   } catch (error) {
     throw normalizeChainError(error, "Failed to approve HLUSD");
+  }
+}
+
+export async function transferHLUSD(recipient: string, amount: string) {
+  try {
+    const token = process.env.NEXT_PUBLIC_HLUSD_ADDRESS;
+    if (!token) {
+      throw new ChainIntegrationError("missing_env", "Missing NEXT_PUBLIC_HLUSD_ADDRESS");
+    }
+
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      throw new ChainIntegrationError("invalid_input", "Funding amount must be greater than zero");
+    }
+
+    const provider = new BrowserProvider(getEthereum() as never);
+    const signer = await provider.getSigner();
+    const contract = new Contract(token, ERC20_ABI, signer);
+
+    const decimals = await contract.decimals();
+    const tx = await contract.transfer(recipient, parseUnits(amount, Number(decimals)));
+    return tx.wait();
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to transfer HLUSD");
   }
 }
 

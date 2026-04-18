@@ -6,6 +6,7 @@ import { callGemini } from "./gemini";
 import { getTokenPrice } from "./priceService";
 import { simulateLPPosition } from "./walletMonitor";
 import { isTemplateAutomationPlaceholder } from "./automationBootstrap";
+import { executeTradingSwap, isRealTradingExecutionEnabled } from "./tradingExecutor";
 import type { AgentJob, AutomationFrequency, ExecutionPolicy, ExecutionResult } from "../types/agent";
 
 const ERC20_ABI = [
@@ -279,15 +280,22 @@ const TOKEN_TO_COINGECKO: Record<string, string> = {
 };
 
 async function executeTradingAutomation(job: AgentJob): Promise<ExecutionResult> {
+  const policy = getExecutionPolicy(job);
   const tokenPair = readText(job.userConfig, ["tokenPair", "Token Pair"], "btc/usdc").toLowerCase();
   const thresholdPrice = readNumber(job.userConfig, ["thresholdPrice", "Price Threshold"], 60000);
   const currentPriceInput = readNumber(job.userConfig, ["currentPrice", "Current Price"], NaN);
   const direction = readText(job.userConfig, ["direction", "Action Type"], "above").toLowerCase() === "below" ? "below" : "above";
-  const action = readText(job.userConfig, ["action"], "alert").toLowerCase() === "simulate-swap" ? "simulate-swap" : "alert";
+  const explicitAction = readText(job.userConfig, ["action", "Action", "Execution Action"], "").toLowerCase();
+  const action =
+    explicitAction === "alert"
+      ? "alert"
+      : explicitAction === "simulate-swap"
+        ? "simulate-swap"
+        : policy.autoExecute === false
+          ? "alert"
+          : "simulate-swap";
   const amount = readNumber(job.userConfig, ["amount", "Amount"], 1);
   const tokens = tokenPair.split(/[/:_\-\s]+/).filter(Boolean);
-  enforceAllowedTokens(job, tokens);
-  enforceSpendLimits(job, amount);
   const baseToken = tokenPair.split(/[/:_\-\s]+/)[0];
   const resolved = TOKEN_TO_COINGECKO[baseToken] || "bitcoin";
   const currentPrice = Number.isFinite(currentPriceInput) ? currentPriceInput : await getTokenPrice(resolved).catch(() => thresholdPrice);
@@ -295,6 +303,64 @@ async function executeTradingAutomation(job: AgentJob): Promise<ExecutionResult>
   const analysis = triggered
     ? `${tokenPair.toUpperCase()} crossed the ${direction} threshold at ${currentPrice}. Estimated spend: ${amount}.`
     : `${tokenPair.toUpperCase()} has not crossed the ${direction} threshold yet. Current price is ${currentPrice}.`;
+
+  if (!triggered || action === "alert") {
+    return {
+      success: true,
+      result: analysis,
+      data: {
+        tokenPair,
+        currentPrice,
+        thresholdPrice,
+        direction,
+        triggered,
+        action: "alert",
+        amount,
+        executionMode: "alert-only"
+      },
+      executedAt: new Date().toISOString()
+    };
+  }
+
+  enforceAllowedTokens(job, tokens);
+  enforceSpendLimits(job, amount);
+
+  const slippageBps =
+    typeof policy.slippageBps === "number" && Number.isFinite(policy.slippageBps) ? policy.slippageBps : 100;
+
+  if (isRealTradingExecutionEnabled()) {
+    const storedAgent = getStoredAgent(job.agentId);
+    if (!storedAgent) {
+      throw new Error("Stored agent not found");
+    }
+
+    const swap = await executeTradingSwap({
+      agentWalletPrivateKey: storedAgent.agentWalletPrivateKey,
+      tokenPair,
+      direction,
+      amount,
+      slippageBps
+    });
+
+    return {
+      success: true,
+      result: `Executed ${swap.strategy} swap for ${swap.inputAmount} ${swap.inputTokenSymbol} into ${swap.outputTokenSymbol}. Estimated spend: ${amount}.`,
+      data: {
+        tokenPair,
+        currentPrice,
+        thresholdPrice,
+        direction,
+        triggered,
+        action,
+        amount,
+        slippageBps,
+        executionMode: "real-swap",
+        swap
+      },
+      txHash: swap.txHash,
+      executedAt: new Date().toISOString()
+    };
+  }
 
   return {
     success: true,
@@ -307,6 +373,7 @@ async function executeTradingAutomation(job: AgentJob): Promise<ExecutionResult>
       triggered,
       action,
       amount,
+      slippageBps,
       executionMode: action === "simulate-swap" ? "policy-guarded-simulation" : "alert-only"
     },
     executedAt: new Date().toISOString()

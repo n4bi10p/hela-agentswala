@@ -1,5 +1,6 @@
 import type { AgentJob } from "../types/agent";
 import { fetchHLUSDBalanceForAddress, fetchNativeBalanceForAddress } from "./contracts";
+import { isRealTradingExecutionEnabled } from "./tradingExecutor";
 
 export type FundingStatus = "empty" | "low" | "funded" | "unknown";
 export type GasFundingStatus = "missing" | "low" | "ready" | "unknown";
@@ -21,12 +22,87 @@ function toNumber(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function readText(job: AgentJob, keys: string[], fallback = ""): string {
+  for (const key of keys) {
+    const value = job.userConfig[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return fallback;
+}
+
+function readNumber(job: AgentJob, keys: string[], fallback: number): number {
+  for (const key of keys) {
+    const value = job.userConfig[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string") {
+      const parsed = Number(value.trim().replace("%", ""));
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return fallback;
+}
+
+function getTradingInputToken(job: AgentJob): string | null {
+  const tokenPair = readText(job, ["tokenPair", "Token Pair"], "").toUpperCase();
+  if (!tokenPair) {
+    return null;
+  }
+
+  const symbols = tokenPair
+    .split(/[/:_\-\s]+/)
+    .map((symbol) => symbol.trim().toUpperCase())
+    .filter(Boolean);
+
+  if (symbols.length !== 2) {
+    return null;
+  }
+
+  const direction = readText(job, ["direction", "Action Type"], "above").toLowerCase() === "below" ? "below" : "above";
+  return direction === "above" ? symbols[0] : symbols[1];
+}
+
+function requiresNativeGas(job: AgentJob, agentType: string | null): boolean {
+  if (agentType === "scheduling") {
+    return true;
+  }
+
+  if (agentType === "trading" && isRealTradingExecutionEnabled()) {
+    const autoExecute = job.executionPolicy?.autoExecute !== false;
+    const explicitAction = readText(job, ["action", "Action", "Execution Action"], "").toLowerCase();
+    const action =
+      explicitAction === "alert"
+        ? "alert"
+        : explicitAction === "simulate-swap"
+          ? "simulate-swap"
+          : autoExecute
+            ? "simulate-swap"
+            : "alert";
+
+    return action === "simulate-swap";
+  }
+
+  return false;
+}
+
 function getRecommendedMinimum(job: AgentJob, agentType: string | null): number | null {
   if (agentType === "content" || agentType === "business") {
     return 0;
   }
 
-  if (agentType === "trading" || agentType === "farming" || agentType === "rebalancing") {
+  if (agentType === "trading") {
+    if (isRealTradingExecutionEnabled() && getTradingInputToken(job) === "HLUSD") {
+      return readNumber(job, ["amount", "Amount"], 1);
+    }
+    return 0;
+  }
+
+  if (agentType === "farming" || agentType === "rebalancing") {
     return 0;
   }
 
@@ -91,16 +167,47 @@ export async function getFundingSnapshot(
     }
 
     if ((recommendedMinimum ?? 0) <= 0) {
+      const needsGas = requiresNativeGas(job, agentType);
+      if (needsGas && nativeBalanceValue <= 0) {
+        return {
+          balanceHLUSD,
+          balanceValue,
+          nativeBalanceHELA,
+          nativeBalanceValue,
+          recommendedMinimumHLUSD: toDisplayAmount(recommendedMinimum),
+          gasFundingStatus: "missing",
+          gasHint: "Add native gas to the agent wallet so it can pay transaction fees.",
+          fundingStatus: "low",
+          fundingHint: "This automation path does not require HLUSD, but the agent wallet needs native gas to execute."
+        };
+      }
+
+      if (needsGas && nativeBalanceValue < MIN_NATIVE_GAS_BALANCE) {
+        return {
+          balanceHLUSD,
+          balanceValue,
+          nativeBalanceHELA,
+          nativeBalanceValue,
+          recommendedMinimumHLUSD: toDisplayAmount(recommendedMinimum),
+          gasFundingStatus: "low",
+          gasHint: "Top up a small amount of native gas so the wallet can pay transaction fees.",
+          fundingStatus: "low",
+          fundingHint: "This automation path does not require HLUSD, but native gas is low for reliable execution."
+        };
+      }
+
       return {
         balanceHLUSD,
         balanceValue,
         nativeBalanceHELA,
         nativeBalanceValue,
         recommendedMinimumHLUSD: toDisplayAmount(recommendedMinimum),
-        gasFundingStatus: "ready",
-        gasHint: "This agent does not require wallet funding for automation runs.",
+        gasFundingStatus: needsGas ? "ready" : "ready",
+        gasHint: needsGas ? "Agent wallet has enough native gas for execution." : "This agent does not require wallet funding for automation runs.",
         fundingStatus: "funded",
-        fundingHint: "This agent can run without HLUSD or agent-wallet gas funding."
+        fundingHint: needsGas
+          ? "This agent does not require HLUSD for the configured path and has enough native gas to run."
+          : "This agent can run without HLUSD or agent-wallet gas funding."
       };
     }
 

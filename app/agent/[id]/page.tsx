@@ -5,7 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { connectWallet, ensureHeLaNetwork, getConnectedAccount } from "@/lib/wallet";
+import { connectWallet, ensureHeLaNetwork, getConnectedAccount, transferHLUSD } from "@/lib/wallet";
 import { getAgentImage, parseConfigSchema } from "@/lib/agentUi";
 
 const AGENTS: Record<
@@ -236,6 +236,8 @@ type AutomationJobView = {
   agentId: string;
   ownerAddress: string;
   frequency: AutomationFrequency;
+  createdAt?: string;
+  updatedAt?: string;
   nextRunAt: string;
   lastRunAt?: string;
   status: "active" | "paused" | "error";
@@ -384,6 +386,50 @@ function getAutomationReadiness(job: AutomationJobView): {
     label: "CHECK FUNDING",
     className: "text-white/70 border-white/20 bg-white/5"
   };
+}
+
+function getAutomationPanelClass(job: AutomationJobView): string {
+  if (job.fundingStatus === "funded" && job.gasFundingStatus === "ready") {
+    return "border-emerald-300/30 bg-emerald-300/5";
+  }
+
+  if (job.gasFundingStatus === "missing" || job.gasFundingStatus === "low") {
+    return "border-yellow-300/30 bg-yellow-300/5";
+  }
+
+  if (job.fundingStatus === "empty" || job.fundingStatus === "low") {
+    return "border-red-300/30 bg-red-300/5";
+  }
+
+  return "border-white/12 bg-white/5";
+}
+
+function getJobSortTimestamp(job: AutomationJobView): number {
+  const candidates = [job.updatedAt, job.lastRunAt, job.nextRunAt, job.createdAt].filter(Boolean) as string[];
+
+  for (const candidate of candidates) {
+    const parsed = Date.parse(candidate);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return 0;
+}
+
+function selectLatestJobForAgent(
+  jobs: AutomationJobView[] | undefined,
+  agentId: string | number
+): AutomationJobView | null {
+  if (!jobs?.length) {
+    return null;
+  }
+
+  return (
+    jobs
+      .filter((job) => String(job.agentId) === String(agentId))
+      .sort((left, right) => getJobSortTimestamp(right) - getJobSortTimestamp(left))[0] || null
+  );
 }
 
 function formatWalletBalance(job: AutomationJobView): string {
@@ -668,6 +714,8 @@ export default function AgentDetailPage() {
   const [existingJob, setExistingJob] = useState<AutomationJobView | null>(null);
   const [activeJobActionId, setActiveJobActionId] = useState<string | null>(null);
   const [isFundingGas, setIsFundingGas] = useState(false);
+  const [isFundingHLUSD, setIsFundingHLUSD] = useState(false);
+  const [hlusdFundingAmount, setHlusdFundingAmount] = useState("5");
   const [executionPolicy, setExecutionPolicy] = useState<ExecutionPolicyDraft>(() =>
     buildDefaultExecutionPolicy(localAgent?.type || "")
   );
@@ -717,8 +765,7 @@ export default function AgentDetailPage() {
 
           if (jobsResponse && jobsResponse.ok) {
             const jobsPayload = (await jobsResponse.json()) as { jobs?: AutomationJobView[] };
-            nextExistingJob =
-              jobsPayload.jobs?.find((job) => String(job.agentId) === String(agentId)) || null;
+            nextExistingJob = selectLatestJobForAgent(jobsPayload.jobs, agentId);
           }
         }
 
@@ -1102,6 +1149,35 @@ export default function AgentDetailPage() {
     }
   };
 
+  const handleFundHLUSD = async () => {
+    if (!displayWalletAddress) {
+      setAutomationError("Create automation first before funding HLUSD.");
+      return;
+    }
+
+    try {
+      setIsFundingHLUSD(true);
+      setAutomationError(null);
+      setAutomationStatus(`Sending ${hlusdFundingAmount} HLUSD to the agent wallet...`);
+
+      await ensureHeLaNetwork();
+      await connectWallet();
+      await transferHLUSD(displayWalletAddress, hlusdFundingAmount);
+
+      const jobId = existingJob?.id || createdJob?.job.id;
+      if (jobId) {
+        await refreshExistingJob(jobId);
+      }
+
+      setAutomationStatus(`Sent ${hlusdFundingAmount} HLUSD to the agent wallet.`);
+    } catch (error: unknown) {
+      setAutomationError(error instanceof Error ? error.message : "Failed to fund the agent wallet with HLUSD.");
+      setAutomationStatus(null);
+    } finally {
+      setIsFundingHLUSD(false);
+    }
+  };
+
   if (!agent && isAgentLoading) {
     return (
       <main className="min-h-screen bg-black">
@@ -1388,7 +1464,11 @@ export default function AgentDetailPage() {
               )}
 
               {displayWalletAddress && (
-                <div className="mt-4 border border-live-signal/30 bg-live-signal/5 p-4">
+                <div
+                  className={`mt-4 border p-4 ${
+                    activeJob ? getAutomationPanelClass(activeJob) : "border-white/12 bg-white/5"
+                  }`}
+                >
                   <p className="font-mono text-xs uppercase text-white/60">Agent Wallet Address</p>
                   <p className="mt-2 break-all font-mono text-xs text-white">{displayWalletAddress}</p>
                   {activeJob && (
@@ -1419,6 +1499,14 @@ export default function AgentDetailPage() {
                       <p className="mt-2 font-mono text-xs text-white/80">
                         {activeJob.fundingHint || "Funding status unavailable."}
                       </p>
+                      {displayWalletAddress &&
+                        (activeJob.fundingStatus === "empty" || activeJob.fundingStatus === "low") &&
+                        activeJob.recommendedMinimumHLUSD &&
+                        activeJob.recommendedMinimumHLUSD !== "0" && (
+                          <p className="mt-2 break-all font-mono text-xs text-red-200">
+                            This job needs HLUSD in agent wallet {displayWalletAddress}. Gas funding alone is not enough.
+                          </p>
+                        )}
                       {activeJob.recommendedMinimumHLUSD !== null && activeJob.recommendedMinimumHLUSD !== undefined && (
                         <p className="mt-2 font-mono text-xs text-white/50">
                           Recommended minimum: {activeJob.recommendedMinimumHLUSD} HLUSD
@@ -1439,28 +1527,52 @@ export default function AgentDetailPage() {
                       )}
                     </div>
                   )}
-                  <div className="mt-4 flex flex-col gap-3 md:flex-row">
-                    <button
-                      onClick={() => handleCopyWalletAddress(displayWalletAddress)}
-                      className="border border-white px-4 py-3 font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black"
-                    >
-                      [ COPY WALLET ADDRESS ]
-                    </button>
-                    <a
-                      href={FAUCET_URL}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="border border-white bg-white px-4 py-3 text-center font-headline text-sm uppercase text-black transition-colors hover:bg-black hover:text-white"
+                  <div className="mt-4 flex flex-col gap-3">
+                    <div className="flex flex-col gap-3 md:flex-row">
+                      <button
+                        onClick={() => handleCopyWalletAddress(displayWalletAddress)}
+                        className="border border-white px-4 py-3 font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black"
                       >
-                        [ OPEN HLUSD FAUCET ↗ ]
+                        [ COPY WALLET ADDRESS ]
+                      </button>
+                      <a
+                        href={FAUCET_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="border border-white bg-white px-4 py-3 text-center font-headline text-sm uppercase text-black transition-colors hover:bg-black hover:text-white"
+                      >
+                        [ OPEN GAS FAUCET ↗ ]
                       </a>
-                    <button
-                      onClick={handleFundGas}
-                      disabled={isFundingGas}
-                      className="border border-white px-4 py-3 font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black disabled:opacity-50"
-                    >
-                      {isFundingGas ? "[ FUNDING GAS... ]" : "[ FUND GAS 0.02 HELA ↗ ]"}
-                    </button>
+                      <button
+                        onClick={handleFundGas}
+                        disabled={isFundingGas}
+                        className="border border-white px-4 py-3 font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black disabled:opacity-50"
+                      >
+                        {isFundingGas ? "[ FUNDING GAS... ]" : "[ FUND GAS 0.02 HELA ↗ ]"}
+                      </button>
+                    </div>
+
+                    <div className="border border-white/12 p-3">
+                      <p className="font-mono text-[11px] uppercase text-white/50">Fund HLUSD From Connected Wallet</p>
+                      <div className="mt-3 flex flex-col gap-3 md:flex-row">
+                        <input
+                          type="number"
+                          min="0.1"
+                          step="0.1"
+                          value={hlusdFundingAmount}
+                          onChange={(event) => setHlusdFundingAmount(event.target.value)}
+                          className="border border-white/20 bg-surface-container p-3 font-mono text-sm text-white focus:border-white focus:outline-none md:w-32"
+                          placeholder="HLUSD"
+                        />
+                        <button
+                          onClick={handleFundHLUSD}
+                          disabled={isFundingHLUSD}
+                          className="border border-white bg-white px-4 py-3 font-headline text-sm uppercase text-black transition-colors hover:bg-black hover:text-white disabled:opacity-50"
+                        >
+                          {isFundingHLUSD ? "[ SENDING HLUSD... ]" : "[ SEND HLUSD ↗ ]"}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
