@@ -1,7 +1,7 @@
 {
   "name": "devclash-hela",
   "version": "1.0.0",
-  "description": "HeLa Agent Bazaar - blockchain and contract integration setup",
+  "description": "Trovia - blockchain and contract integration setup",
   "main": "index.js",
   "scripts": {
     "clean": "hardhat clean",

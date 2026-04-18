@@ -1,4 +1,4 @@
-# 🏪 HeLa Agent Bazaar — DevClash 2026 PRD
+# 🏪 Trovia — DevClash 2026 PRD
 **Team:** Nabil, Bhumi, Aman, Madhura, Saad  
 **Problem Statement:** PS 03 — Agent Marketplace  
 **Hackathon:** DevClash 2026 | April 18–19 | Dr. D.Y. Patil Institute of Technology, Pimpri  
@@ -10,7 +10,7 @@
 
 > **"An on-chain App Store for AI agents — developers publish them, anyone can activate and use them, all powered by HeLa's AI-native blockchain."**
 
-HeLa Agent Bazaar is a decentralized marketplace where developers deploy AI agents as smart contracts on HeLa Chain. Non-technical buyers browse, pay in HLUSD, and activate agents with one click — no setup, no code, no friction. Every agent listed in PS 03 is pre-built and live on the marketplace at demo time.
+Trovia is a decentralized marketplace where developers deploy AI agents as smart contracts on HeLa Chain. Non-technical buyers browse, pay in HLUSD, and activate agents with one click — no setup, no code, no friction. Every agent listed in PS 03 is pre-built and live on the marketplace at demo time.
 
 ---
 
@@ -418,7 +418,7 @@ NEXT_PUBLIC_HLUSD_ADDRESS=0x...          # HeLa HLUSD token
 
 **Duration: ~8 minutes**
 
-1. **(30s)** — Open landing page. "This is HeLa Agent Bazaar — an on-chain marketplace for AI agents."
+1. **(30s)** — Open landing page. "This is Trovia — an on-chain marketplace for AI agents."
 2. **(30s)** — Connect MetaMask to HeLa testnet. Show wallet address and HLUSD balance.
 3. **(1min)** — Browse marketplace. Show all 6 agent cards. "These are all built on HeLa smart contracts."
 4. **(2min)** — Click Scheduling Agent. Fill config (recipient + amount + weekly). Click Activate. MetaMask prompt. Confirm. Show tx hash + HeLa explorer link. "Payment in HLUSD, developer gets paid instantly, no middleman."
@@ -441,5 +441,5 @@ NEXT_PUBLIC_HLUSD_ADDRESS=0x...          # HeLa HLUSD token
 
 ---
 
-*Built for DevClash 2026 by Team HeLa Agent Bazaar*  
+*Built for DevClash 2026 by Team Trovia*  
 *Nabil · Bhumi · Aman · Madhura · Saad*
