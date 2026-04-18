@@ -125,7 +125,7 @@ export default function Home() {
             { number: "6", label: "Agent Types" },
             { number: "100%", label: "On-Chain" },
             { number: "HLUSD", label: "Stable Gas" },
-            { number: "8668", label: "Chain ID" },
+            { number: "666888", label: "Chain ID" },
           ].map((stat, idx) => (
             <div
               key={idx}

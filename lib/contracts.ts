@@ -26,13 +26,24 @@ export type TxResult = {
   status: "success" | "reverted" | "unknown";
 };
 
-declare global {
-  interface Window {
-    ethereum?: {
-      request: (payload: { method: string; params?: unknown[] }) => Promise<unknown>;
-    };
-  }
-}
+export type ActivationEventRecord = {
+  activationId: number;
+  agentId: number;
+  buyer: string;
+  config: string;
+  paidAmount: bigint;
+  timestamp: number;
+  txHash: string;
+};
+
+export type ExecutionEventRecord = {
+  agentId: number;
+  user: string;
+  action: string;
+  result: string;
+  timestamp: number;
+  txHash: string;
+};
 
 const AGENT_REGISTRY_ABI = [
   "function publishAgent(string name,string description,string agentType,uint256 priceHLUSD,string configSchema) returns (uint256)",
@@ -43,8 +54,11 @@ const AGENT_REGISTRY_ABI = [
 
 const AGENT_ESCROW_ABI = [
   "function activateAgent(uint256 agentId, string userConfig)",
-  "function userActiveAgents(address user, uint256 index) view returns (uint256)",
-  "event AgentActivated(uint256 indexed agentId, address indexed buyer, string config, uint256 timestamp)"
+  "function getActivationCountForAgent(uint256 agentId) view returns (uint256)",
+  "function getUserActiveAgents(address user) view returns (uint256[] memory)",
+  "function getUserActiveAgentCount(address user) view returns (uint256)",
+  "function isAgentActivatedByUser(address user, uint256 agentId) view returns (bool)",
+  "event AgentActivated(uint256 indexed activationId, uint256 indexed agentId, address indexed buyer, string config, uint256 paidAmount, uint256 timestamp)"
 ];
 
 const AGENT_EXECUTOR_ABI = [
@@ -52,7 +66,10 @@ const AGENT_EXECUTOR_ABI = [
   "event ExecutionLogged(uint256 indexed agentId, address indexed user, string action, string result, uint256 timestamp)"
 ];
 
-const getRpcUrl = () => process.env.NEXT_PUBLIC_HELA_RPC || "https://testnet-rpc.helachain.com";
+const getRpcUrl = () =>
+  process.env.NEXT_PUBLIC_HELA_RPC ||
+  process.env.NEXT_PUBLIC_HELA_RPC_URL ||
+  "https://testnet-rpc.helachain.com";
 
 const getAddresses = () => {
   const registry = process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS;
@@ -65,6 +82,10 @@ const getAddresses = () => {
 
   return { registry, escrow, executor };
 };
+
+export function getPublicContractAddresses() {
+  return getAddresses();
+}
 
 export const getReadProvider = () => new JsonRpcProvider(getRpcUrl());
 
@@ -195,6 +216,35 @@ export async function fetchAgentById(id: number): Promise<AgentStruct> {
   }
 }
 
+export async function fetchAgentActivationCount(agentId: number): Promise<number> {
+  try {
+    const escrow = await getEscrowContract(false);
+    const count = (await escrow.getActivationCountForAgent(agentId)) as bigint;
+    return Number(count);
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to fetch activation count");
+  }
+}
+
+export async function fetchUserActiveAgentIds(userAddress: string): Promise<number[]> {
+  try {
+    const escrow = await getEscrowContract(false);
+    const ids = (await escrow.getUserActiveAgents(userAddress)) as bigint[];
+    return ids.map((id) => Number(id));
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to fetch active agents for user");
+  }
+}
+
+export async function isAgentActivatedByUser(userAddress: string, agentId: number): Promise<boolean> {
+  try {
+    const escrow = await getEscrowContract(false);
+    return (await escrow.isAgentActivatedByUser(userAddress, agentId)) as boolean;
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to check user activation status");
+  }
+}
+
 export async function setAgentActive(id: number, active: boolean): Promise<TxResult> {
   try {
     const registry = await getRegistryContract(true);
@@ -219,5 +269,83 @@ export async function logExecution(
     return toTxResult(receipt);
   } catch (error) {
     throw normalizeChainError(error, "Failed to log execution");
+  }
+}
+
+export async function fetchActivationEventsForUser(
+  userAddress: string
+): Promise<ActivationEventRecord[]> {
+  try {
+    const escrow = await getEscrowContract(false);
+    const filter = escrow.filters.AgentActivated(null, null, userAddress);
+    const events = await escrow.queryFilter(filter, 0, "latest");
+
+    return events
+      .map((event) => {
+        if (!("args" in event)) {
+          return null;
+        }
+
+        const args = event.args as unknown as {
+          activationId: bigint;
+          agentId: bigint;
+          buyer: string;
+          config: string;
+          paidAmount: bigint;
+          timestamp: bigint;
+        };
+
+        return {
+          activationId: Number(args.activationId),
+          agentId: Number(args.agentId),
+          buyer: String(args.buyer),
+          config: String(args.config),
+          paidAmount: BigInt(args.paidAmount),
+          timestamp: Number(args.timestamp),
+          txHash: event.transactionHash
+        };
+      })
+      .filter((event): event is ActivationEventRecord => event !== null)
+      .sort((left, right) => right.timestamp - left.timestamp);
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to fetch activation events");
+  }
+}
+
+export async function fetchExecutionEventsForUser(
+  userAddress: string
+): Promise<ExecutionEventRecord[]> {
+  try {
+    const executor = await getExecutorContract(false);
+    const filter = executor.filters.ExecutionLogged(null, userAddress);
+    const events = await executor.queryFilter(filter, 0, "latest");
+
+    return events
+      .map((event) => {
+        if (!("args" in event)) {
+          return null;
+        }
+
+        const args = event.args as unknown as {
+          agentId: bigint;
+          user: string;
+          action: string;
+          result: string;
+          timestamp: bigint;
+        };
+
+        return {
+          agentId: Number(args.agentId),
+          user: String(args.user),
+          action: String(args.action),
+          result: String(args.result),
+          timestamp: Number(args.timestamp),
+          txHash: event.transactionHash
+        };
+      })
+      .filter((event): event is ExecutionEventRecord => event !== null)
+      .sort((left, right) => right.timestamp - left.timestamp);
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to fetch execution events");
   }
 }

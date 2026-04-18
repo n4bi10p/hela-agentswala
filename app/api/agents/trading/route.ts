@@ -137,7 +137,7 @@ function isTriggered(input: TradingInput): boolean {
   return Math.abs(input.currentPrice - input.thresholdPrice) < Number.EPSILON;
 }
 
-export async function runTradingAgent(input: TradingInput): Promise<TradingResult> {
+async function runTradingAgent(input: TradingInput): Promise<TradingResult> {
   const triggered = isTriggered(input);
 
   let analysis = "[SIMULATED] Threshold not crossed. No market analysis required yet.";

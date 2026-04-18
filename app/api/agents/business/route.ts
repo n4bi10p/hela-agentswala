@@ -102,7 +102,7 @@ function parseInput(body: unknown): BusinessInput {
   };
 }
 
-export async function runBusinessAgent(input: BusinessInput): Promise<BusinessResult> {
+async function runBusinessAgent(input: BusinessInput): Promise<BusinessResult> {
   const systemContext = [
     "You are a senior business operations assistant.",
     `Always respond in ${input.language}.`,

@@ -1,145 +1,154 @@
 "use client";
 
-import { TopNavBar } from "@/components/TopNavBar";
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { TopNavBar } from "@/components/TopNavBar";
+import { publishAgent, type AgentType } from "@/lib/contracts";
+import { connectWallet, ensureHeLaNetwork, persistConnectedAccount } from "@/lib/wallet";
 
-const AGENT_TYPES = [
-  "TRADING",
-  "FARMING",
-  "SCHEDULING",
-  "REBALANCING",
-  "CONTENT",
-  "BUSINESS",
-];
+const AGENT_TYPES = ["trading", "farming", "scheduling", "rebalancing", "content", "business"] as const;
+
+function defaultSchemaFor(agentType: string) {
+  if (agentType === "scheduling") {
+    return JSON.stringify(
+      [
+        { key: "recipient", type: "text", placeholder: "0x..." },
+        { key: "amount", type: "number", placeholder: "100" },
+        { key: "frequency", type: "select", options: ["daily", "weekly", "monthly"] }
+      ],
+      null,
+      2
+    );
+  }
+
+  return JSON.stringify({ notes: "text" }, null, 2);
+}
 
 export default function PublishPage() {
   const [formData, setFormData] = useState({
     name: "",
     description: "",
-    agentType: "",
+    agentType: "trading",
     price: "",
-    configSchema: "",
+    configSchema: defaultSchemaFor("trading")
   });
-
   const [isPublishing, setIsPublishing] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [lastTxHash, setLastTxHash] = useState<string | null>(null);
 
-  const handleInputChange = (
-    field: string,
-    value: string
-  ) => {
+  const explorerBase = useMemo(
+    () => (process.env.NEXT_PUBLIC_HELA_RPC ? "https://testnet-blockexplorer.helachain.com/tx/" : null),
+    []
+  );
+
+  const handleInputChange = (field: string, value: string) => {
     setFormData((prev) => ({
       ...prev,
       [field]: value,
+      ...(field === "agentType" && !prev.configSchema.trim() ? { configSchema: defaultSchemaFor(value) } : {})
     }));
   };
 
   const handlePublish = async () => {
-    // Validate form
-    if (
-      !formData.name ||
-      !formData.description ||
-      !formData.agentType ||
-      !formData.price
-    ) {
-      alert("Please fill in all required fields");
-      return;
+    try {
+      if (!formData.name || !formData.description || !formData.price) {
+        setError("Please fill in all required fields.");
+        return;
+      }
+
+      JSON.parse(formData.configSchema);
+
+      setIsPublishing(true);
+      setError(null);
+      setLastTxHash(null);
+      setStatusMessage("Connecting wallet...");
+
+      await ensureHeLaNetwork();
+      const connectedAccount = await connectWallet();
+      persistConnectedAccount(connectedAccount);
+
+      setStatusMessage("Submitting publish transaction...");
+        const txResult = await publishAgent({
+          name: formData.name.trim(),
+          description: formData.description.trim(),
+          agentType: formData.agentType as AgentType,
+          price: formData.price,
+          configSchema: formData.configSchema
+        });
+
+      setLastTxHash(txResult.hash);
+      setStatusMessage("Agent published on-chain.");
+      setFormData({
+        name: "",
+        description: "",
+        agentType: "trading",
+        price: "",
+        configSchema: defaultSchemaFor("trading")
+      });
+    } catch (publishError) {
+      if (publishError instanceof SyntaxError) {
+        setError("Configuration schema must be valid JSON.");
+      } else {
+        setError(publishError instanceof Error ? publishError.message : "Failed to publish agent.");
+      }
+      setStatusMessage(null);
+    } finally {
+      setIsPublishing(false);
     }
-
-    setIsPublishing(true);
-    // Simulate API call and contract interaction
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    setIsPublishing(false);
-
-    alert(
-      `Agent "${formData.name}" published successfully! Transaction pending confirmation on HeLa Chain.`
-    );
-
-    // Reset form
-    setFormData({
-      name: "",
-      description: "",
-      agentType: "",
-      price: "",
-      configSchema: "",
-    });
   };
 
   return (
     <main className="min-h-screen bg-black">
       <TopNavBar />
 
-      {/* Page Header */}
-      <header className="px-8 pt-16 pb-8 border-b border-white/10 mt-24">
-        <div className="flex items-center gap-4 mb-4">
-          <span className="font-mono text-sm text-white bracket-link cursor-pointer">
-            PUBLISH
-          </span>
-          <span className="font-mono text-sm text-white/20 select-none">
-            ░░░░░░░░░░░░░░
-          </span>
+      <header className="mt-24 border-b border-white/10 px-8 pb-8 pt-16">
+        <div className="mb-4 flex items-center gap-4">
+          <span className="bracket-link cursor-pointer font-mono text-sm text-white">PUBLISH</span>
+          <span className="select-none font-mono text-sm text-white/20">░░░░░░░░░░░░░░</span>
         </div>
-        <h1 className="font-headline text-[120px] leading-none tracking-tight text-white">
-          PUBLISH
-        </h1>
+        <h1 className="font-headline text-[120px] leading-none tracking-tight text-white">PUBLISH</h1>
       </header>
 
-      <div className="p-8 max-w-2xl mx-auto py-16">
-        <div className="border border-white/12 p-8 flex flex-col gap-8">
+      <div className="mx-auto max-w-2xl p-8 py-16">
+        <div className="flex flex-col gap-8 border border-white/12 p-8">
           <div>
-            <h2 className="font-headline text-4xl text-white mb-2 uppercase">
-              Publish Your Agent
-            </h2>
-            <p className="text-white/60 text-sm leading-relaxed uppercase">
-              Submit your AI agent to the Trovia marketplace. Fill in the
-              details below and your agent will be reviewed and deployed on HeLa
-              Chain.
+            <h2 className="mb-2 font-headline text-4xl uppercase text-white">Publish Your Agent</h2>
+            <p className="text-sm uppercase leading-relaxed text-white/60">
+              Register a new agent directly on HeLa using your connected developer wallet.
             </p>
           </div>
 
-          {/* Form Fields */}
           <div className="flex flex-col gap-6">
-            {/* Agent Name */}
             <div className="flex flex-col gap-2">
-              <label className="font-mono text-xs text-white/60 uppercase">
-                Agent Name *
-              </label>
+              <label className="font-mono text-xs uppercase text-white/60">Agent Name *</label>
               <input
                 type="text"
-                placeholder="e.g., Advanced Trading Bot"
                 value={formData.name}
-                onChange={(e) => handleInputChange("name", e.target.value)}
-                className="bg-surface-container border border-white/20 text-white placeholder-white/30 p-3 font-body text-sm focus:outline-none focus:border-white transition-colors"
+                onChange={(event) => handleInputChange("name", event.target.value)}
+                placeholder="e.g., Advanced Trading Bot"
+                className="bg-surface-container border border-white/20 p-3 font-body text-sm text-white placeholder-white/30 transition-colors focus:border-white focus:outline-none"
               />
             </div>
 
-            {/* Description */}
             <div className="flex flex-col gap-2">
-              <label className="font-mono text-xs text-white/60 uppercase">
-                Description *
-              </label>
+              <label className="font-mono text-xs uppercase text-white/60">Description *</label>
               <textarea
-                placeholder="Describe what your agent does, its features, and benefits..."
                 value={formData.description}
-                onChange={(e) =>
-                  handleInputChange("description", e.target.value)
-                }
-                className="bg-surface-container border border-white/20 text-white placeholder-white/30 p-3 font-body text-sm focus:outline-none focus:border-white transition-colors"
+                onChange={(event) => handleInputChange("description", event.target.value)}
+                placeholder="Describe what your agent does..."
+                className="bg-surface-container border border-white/20 p-3 font-body text-sm text-white placeholder-white/30 transition-colors focus:border-white focus:outline-none"
                 rows={4}
               />
             </div>
 
-            {/* Agent Type */}
             <div className="flex flex-col gap-2">
-              <label className="font-mono text-xs text-white/60 uppercase">
-                Agent Type *
-              </label>
+              <label className="font-mono text-xs uppercase text-white/60">Agent Type *</label>
               <select
                 value={formData.agentType}
-                onChange={(e) => handleInputChange("agentType", e.target.value)}
-                className="bg-surface-container border border-white/20 text-white placeholder-white/30 p-3 font-body text-sm focus:outline-none focus:border-white transition-colors"
+                onChange={(event) => handleInputChange("agentType", event.target.value)}
+                className="bg-surface-container border border-white/20 p-3 font-body text-sm uppercase text-white transition-colors focus:border-white focus:outline-none"
               >
-                <option value="">Select an agent type</option>
                 {AGENT_TYPES.map((type) => (
                   <option key={type} value={type}>
                     {type}
@@ -148,65 +157,63 @@ export default function PublishPage() {
               </select>
             </div>
 
-            {/* Price */}
             <div className="flex flex-col gap-2">
-              <label className="font-mono text-xs text-white/60 uppercase">
-                Price (HLUSD/Hour) *
-              </label>
+              <label className="font-mono text-xs uppercase text-white/60">Activation Price (HLUSD) *</label>
               <input
                 type="number"
                 step="0.1"
-                placeholder="e.g., 2.5"
                 value={formData.price}
-                onChange={(e) => handleInputChange("price", e.target.value)}
-                className="bg-surface-container border border-white/20 text-white placeholder-white/30 p-3 font-body text-sm focus:outline-none focus:border-white transition-colors"
+                onChange={(event) => handleInputChange("price", event.target.value)}
+                placeholder="e.g., 2.5"
+                className="bg-surface-container border border-white/20 p-3 font-body text-sm text-white placeholder-white/30 transition-colors focus:border-white focus:outline-none"
               />
             </div>
 
-            {/* Config Schema */}
             <div className="flex flex-col gap-2">
-              <label className="font-mono text-xs text-white/60 uppercase">
-                Configuration Schema (JSON)
-              </label>
+              <label className="font-mono text-xs uppercase text-white/60">Configuration Schema (JSON)</label>
               <textarea
-                placeholder='[{"field": "paramName", "type": "text", "placeholder": "description"}]'
                 value={formData.configSchema}
-                onChange={(e) =>
-                  handleInputChange("configSchema", e.target.value)
-                }
-                className="bg-surface-container border border-white/20 text-white placeholder-white/30 p-3 font-mono text-xs focus:outline-none focus:border-white transition-colors"
-                rows={6}
+                onChange={(event) => handleInputChange("configSchema", event.target.value)}
+                className="bg-surface-container border border-white/20 p-3 font-mono text-xs text-white placeholder-white/30 transition-colors focus:border-white focus:outline-none"
+                rows={8}
               />
             </div>
 
-            {/* Info Box */}
-            <div className="bg-white/5 border border-white/10 p-4 flex flex-col gap-2">
-              <p className="font-mono text-xs text-white/60 uppercase font-bold">
-                Requirements
+            <div className="bg-white/5 border border-white/10 p-4">
+              <p className="font-mono text-xs font-bold uppercase text-white/60">Requirements</p>
+              <p className="mt-2 text-xs uppercase leading-relaxed text-white/60">
+                Wallet on HeLa, valid config schema JSON, and clear agent metadata ready for on-chain publishing.
               </p>
-              <ul className="text-white/60 text-xs leading-relaxed space-y-1 font-body uppercase">
-                <li>✓ Connected wallet on HeLa Chain</li>
-                <li>✓ Agent implementation deployed on HeLa</li>
-                <li>✓ Configuration schema defines buyer inputs</li>
-                <li>✓ Clear description of agent functionality</li>
-                <li>✓ Agreed to marketplace terms</li>
-              </ul>
             </div>
+
+            {statusMessage && <p className="font-mono text-xs uppercase text-white/50">{statusMessage}</p>}
+            {error && <p className="font-mono text-xs uppercase text-red-400">{error}</p>}
+            {lastTxHash && (
+              <p className="font-mono text-xs uppercase text-white/60">
+                Tx Hash:{" "}
+                {explorerBase ? (
+                  <a href={`${explorerBase}${lastTxHash}`} target="_blank" rel="noreferrer" className="text-white">
+                    {lastTxHash}
+                  </a>
+                ) : (
+                  lastTxHash
+                )}
+              </p>
+            )}
           </div>
 
-          {/* Buttons */}
-          <div className="flex flex-col md:flex-row gap-4">
+          <div className="flex flex-col gap-4 md:flex-row">
             <button
               onClick={handlePublish}
               disabled={isPublishing}
-              className="flex-1 bg-white text-black py-4 font-headline text-xl hover:bg-black hover:text-white border border-white transition-colors disabled:opacity-50 uppercase"
+              className="flex-1 border border-white bg-white py-4 font-headline text-xl uppercase text-black transition-colors hover:bg-black hover:text-white disabled:opacity-50"
             >
               {isPublishing ? "PUBLISHING..." : "[ PUBLISH ↗ ]"}
             </button>
 
             <Link
               href="/marketplace"
-              className="flex-1 border border-white text-white py-4 font-headline text-xl hover:bg-white hover:text-black transition-colors text-center uppercase"
+              className="flex-1 border border-white py-4 text-center font-headline text-xl uppercase text-white transition-colors hover:bg-white hover:text-black"
             >
               [ BACK ↗ ]
             </Link>

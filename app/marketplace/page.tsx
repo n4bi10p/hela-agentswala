@@ -1,133 +1,100 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { formatUnits } from "ethers";
 import { TopNavBar } from "@/components/TopNavBar";
 import { AgentCard } from "@/components/AgentCard";
+import { fetchAgentActivationCount, fetchAllAgents, type AgentStruct } from "@/lib/contracts";
+import { getAgentImage, toAgentTypeLabel } from "@/lib/agentUi";
 
-const AGENTS = [
-  {
-    id: 1,
-    name: "Trading Bot",
-    type: "TRADING",
-    description:
-      "Monitors price thresholds and executes swaps across multiple liquidity pools with precision timing.",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuCP9WykVHXlBO4UR2yXu_3m-9IlbFZ2gQIcMEdQEFf9kGLNUq3OsUSKEd-VP82nlecVqwhbNq-gonLvflkS3USYdgiPjK3LnO14jyjCtsyoXoWhgddIoMD7l4mDOaljT05Z6K5HXw2-DtHyNQRWIr3YVhYzViY-zmT2_q0hdYaHqqVYeK02HmzB_BbVzpyU-W444Ddm1M8nXvvT5padIoGxZGyKmLtGHJA73rLAHpMHnKxe3z179wvZf3q8lJpEHjZkxmW_IL2iOFY",
-    price: 2.5,
-    activeCount: 24,
-    isLive: true,
-  },
-  {
-    id: 2,
-    name: "Yield Orchestrator",
-    type: "FARMING",
-    description:
-      "Auto-compounds yield, monitors LP positions and suggests optimal farming strategies.",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuCsYXxIvzCasfwu0KjYNIBqyp1bFixdCnGRqahsrugyzKTdlpaGYJekeVsoCU80cL0ClsaNm1FUZV7OHNfe7ilj-_l2COB9BDtlqOfu0HEjItghJg8n2BazGMVB6NGd_jKE5p3iIUTBOuXIBCUcdRPsNbvuOncUKAoiw2vvz28Edhtyu7cNaMo24d13vtgrzJqATCd0DPQq1HH72HD6hjJ4vCZ6_nWMAJrgRtul6oDOhyJ9D95rrWRDMpXWM8gJgn5MwzQSljgigWY",
-    price: 0.8,
-    activeCount: 812,
-    isLive: true,
-  },
-  {
-    id: 3,
-    name: "Social Sentinel",
-    type: "CONTENT",
-    description:
-      "Gemini-powered social media content auto-responder with tone customization.",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuCdvfCf5x6E9xZ1AIosqHI4a2tE0JdCcz9eA6a0Mg1XVmXbiUf9tvBcRRdtvhuLii5lPeODU7FR5BT6cbAZZOH8IW5iM6UcR9es5YxQdlDcFnKhHDEhkzm25txi8bCgKRgLbhTJdgJ4ptuZK6HaIddvX8vLhaAL8LvsrsMB3dGgrVmUAgyYqRN9SDUWaz-CfvrK2r8-dBCa57ZYpspB8HEKiGrXhWrUoI3-LDWeMc8dOjvKSHsWXCLg8frA1SnBPO4ihdmXdOGczmY",
-    price: 1.2,
-    activeCount: 12,
-    isLive: false,
-  },
-  {
-    id: 4,
-    name: "Arb Master Z",
-    type: "TRADING",
-    description: "Advanced arbitrage detection and execution across DEX pools.",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuBnv7KX2CUfHTtVNxA3N1yyGsjzDYkP_tVm03JkSp3rGuTJQF3OvgGDqR9hxevv8RomyvjQ6-OpASMXLDOTmas1e_LExvngr7iYa9-gZKbhMMtfxN2_QEUutB8pNwKVbqGnEG4pdiorgTct8ZPrxVV1m9RqZGcuRbQ1S9Pzs4Vnw9j5CXoVZVBXmQ5nwmxi5VxpPjwhUcoI6Il77MiHdn5XqHSFwI8z4rfxhVaUDWKbf80d-7E65rlm75sk4g5o6hL3I5FpuJ6K6X8",
-    price: 4.2,
-    activeCount: 56,
-    isLive: true,
-  },
-  {
-    id: 5,
-    name: "Schedule Master",
-    type: "SCHEDULING",
-    description:
-      "Recurring HLUSD payments on customizable time-based triggers.",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuCP9WykVHXlBO4UR2yXu_3m-9IlbFZ2gQIcMEdQEFf9kGLNUq3OsUSKEd-VP82nlecVqwhbNq-gonLvflkS3USYdgiPjK3LnO14jyjCtsyoXoWhgddIoMD7l4mDOaljT05Z6K5HXw2-DtHyNQRWIr3YVhYzViY-zmT2_q0hdYaHqqVYeK02HmzB_BbVzpyU-W444Ddm1M8nXvvT5padIoGxZGyKmLtGHJA73rLAHpMHnKxe3z179wvZf3q8lJpEHjZkxmW_IL2iOFY",
-    price: 0.5,
-    activeCount: 234,
-    isLive: true,
-  },
-  {
-    id: 6,
-    name: "Portfolio Rebalancer",
-    type: "REBALANCING",
-    description:
-      "Monitors wallet allocation drift and suggests rebalancing trades.",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuCsYXxIvzCasfwu0KjYNIBqyp1bFixdCnGRqahsrugyzKTdlpaGYJekeVsoCU80cL0ClsaNm1FUZV7OHNfe7ilj-_l2COB9BDtlqOfu0HEjItghJg8n2BazGMVB6NGd_jKE5p3iIUTBOuXIBCUcdRPsNbvuOncUKAoiw2vvz28Edhtyu7cNaMo24d13vtgrzJqATCd0DPQq1HH72HD6hjJ4vCZ6_nWMAJrgRtul6oDOhyJ9D95rrWRDMpXWM8gJgn5MwzQSljgigWY",
-    price: 1.8,
-    activeCount: 89,
-    isLive: true,
-  },
-  {
-    id: 7,
-    name: "Business Assistant",
-    type: "BUSINESS",
-    description: "Gemini AI answers queries, drafts emails, and summarizes documents.",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuBnv7KX2CUfHTtVNxA3N1yyGsjzDYkP_tVm03JkSp3rGuTJQF3OvgGDqR9hxevv8RomyvjQ6-OpASMXLDOTmas1e_LExvngr7iYa9-gZKbhMMtfxN2_QEUutB8pNwKVbqGnEG4pdiorgTct8ZPrxVV1m9RqZGcuRbQ1S9Pzs4Vnw9j5CXoVZVBXmQ5nwmxi5VxpPjwhUcoI6Il77MiHdn5XqHSFwI8z4rfxhVaUDWKbf80d-7E65rlm75sk4g5o6hL3I5FpuJ6K6X8",
-    price: 2.0,
-    activeCount: 156,
-    isLive: true,
-  },
-];
+type MarketplaceAgent = {
+  id: number;
+  name: string;
+  type: string;
+  description: string;
+  image: string;
+  price: number;
+  activeCount: number;
+  isLive: boolean;
+};
 
-const AGENT_TYPES = [
-  "ALL",
-  "TRADING",
-  "FARMING",
-  "SCHEDULING",
-  "REBALANCING",
-  "CONTENT",
-  "BUSINESS",
-];
+const AGENT_TYPES = ["ALL", "TRADING", "FARMING", "SCHEDULING", "REBALANCING", "CONTENT", "BUSINESS"];
+
+function mapAgent(agent: AgentStruct, activeCount: number): MarketplaceAgent {
+  return {
+    id: Number(agent.id),
+    name: agent.name,
+    type: toAgentTypeLabel(agent.agentType),
+    description: agent.description,
+    image: getAgentImage(agent.agentType),
+    price: Number(formatUnits(agent.priceHLUSD, 18)),
+    activeCount,
+    isLive: agent.isActive
+  };
+}
 
 export default function MarketplacePage() {
   const [selectedType, setSelectedType] = useState("ALL");
+  const [agents, setAgents] = useState<MarketplaceAgent[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const filteredAgents =
-    selectedType === "ALL"
-      ? AGENTS
-      : AGENTS.filter((agent) => agent.type === selectedType);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAgents() {
+      try {
+        setIsLoading(true);
+        setError(null);
+
+        const allAgents = await fetchAllAgents();
+        const activationCounts = await Promise.all(
+          allAgents.map((agent) => fetchAgentActivationCount(Number(agent.id)).catch(() => 0))
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        setAgents(allAgents.map((agent, index) => mapAgent(agent, activationCounts[index] || 0)));
+      } catch (loadError) {
+        if (cancelled) {
+          return;
+        }
+
+        setError(loadError instanceof Error ? loadError.message : "Failed to load marketplace agents");
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    loadAgents();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const filteredAgents = useMemo(
+    () => (selectedType === "ALL" ? agents : agents.filter((agent) => agent.type === selectedType)),
+    [agents, selectedType]
+  );
 
   return (
     <main className="min-h-screen bg-black">
       <TopNavBar />
 
-      {/* Page Header */}
-      <header className="px-8 pt-16 pb-8 border-b border-white/10 mt-24">
-        <div className="flex items-center gap-4 mb-4">
-          <span className="font-mono text-sm text-white bracket-link cursor-pointer">
-            MARKETPLACE
-          </span>
-          <span className="font-mono text-sm text-white/20 select-none">
-            ░░░░░░░░░░░░░░
-          </span>
+      <header className="mt-24 border-b border-white/10 px-8 pb-8 pt-16">
+        <div className="mb-4 flex items-center gap-4">
+          <span className="bracket-link cursor-pointer font-mono text-sm text-white">MARKETPLACE</span>
+          <span className="select-none font-mono text-sm text-white/20">░░░░░░░░░░░░░░</span>
         </div>
-        <h1 className="font-headline text-[120px] leading-none tracking-tight text-white">
-          AGENTS
-        </h1>
+        <h1 className="font-headline text-[120px] leading-none tracking-tight text-white">AGENTS</h1>
       </header>
 
-      {/* Filter Tabs */}
-      <section className="flex flex-wrap gap-4 px-8 py-6 bg-black border-b border-white/10 sticky top-24 z-40">
+      <section className="sticky top-24 z-40 flex flex-wrap gap-4 border-b border-white/10 bg-black px-8 py-6">
         {AGENT_TYPES.map((type) => (
           <button
             key={type}
@@ -135,7 +102,7 @@ export default function MarketplacePage() {
             className={`px-6 py-2 font-headline text-xl tracking-widest transition-all ${
               selectedType === type
                 ? "bg-white text-black"
-                : "bg-transparent text-white border border-white hover:bg-white/5"
+                : "border border-white bg-transparent text-white hover:bg-white/5"
             }`}
           >
             {type}
@@ -143,23 +110,28 @@ export default function MarketplacePage() {
         ))}
       </section>
 
-      {/* Agent Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-8">
-        {filteredAgents.map((agent) => (
-          <AgentCard key={agent.id} {...agent} />
-        ))}
-      </div>
+      {isLoading ? (
+        <div className="flex items-center justify-center py-32">
+          <p className="font-mono text-sm uppercase text-white/60">Loading on-chain marketplace...</p>
+        </div>
+      ) : error ? (
+        <div className="mx-8 my-10 border border-red-500/40 bg-red-500/5 p-6">
+          <p className="font-headline text-2xl uppercase text-white">Marketplace unavailable</p>
+          <p className="mt-2 font-mono text-xs text-white/60">{error}</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 p-8 md:grid-cols-2 lg:grid-cols-3">
+          {filteredAgents.map((agent) => (
+            <AgentCard key={agent.id} {...agent} />
+          ))}
+        </div>
+      )}
 
-      {/* Empty State */}
-      {filteredAgents.length === 0 && (
+      {!isLoading && !error && filteredAgents.length === 0 && (
         <div className="flex items-center justify-center py-32">
           <div className="text-center">
-            <h3 className="font-headline text-4xl text-white mb-4">
-              NO AGENTS FOUND
-            </h3>
-            <p className="text-white/60">
-              Try selecting a different agent type
-            </p>
+            <h3 className="mb-4 font-headline text-4xl text-white">NO AGENTS FOUND</h3>
+            <p className="text-white/60">Try selecting a different agent type</p>
           </div>
         </div>
       )}

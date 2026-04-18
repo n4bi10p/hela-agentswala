@@ -4,6 +4,9 @@
   "description": "Trovia - blockchain and contract integration setup",
   "main": "index.js",
   "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
     "clean": "hardhat clean",
     "compile": "hardhat compile",
     "test": "hardhat test",
@@ -30,8 +33,15 @@
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^6.1.2",
     "@types/node": "^25.6.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.5.0",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^14.2.35",
     "hardhat": "^2.28.6",
+    "postcss": "^8.5.10",
+    "tailwindcss": "^3.4.17",
     "ts-node": "^10.9.2",
-    "typescript": "^6.0.3"
+    "typescript": "^5.6.3"
   }
 }

@@ -119,7 +119,7 @@ function parseReplies(raw: string): [string, string, string] {
   return [parsed[0].trim(), parsed[1].trim(), parsed[2].trim()];
 }
 
-export async function runContentAgent(input: ContentInput): Promise<ContentResult> {
+async function runContentAgent(input: ContentInput): Promise<ContentResult> {
   const systemContext = [
     "You are an expert social media response assistant.",
     "You must return exactly one JSON array with 3 strings and no extra text.",

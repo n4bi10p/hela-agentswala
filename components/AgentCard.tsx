@@ -60,7 +60,7 @@ export function AgentCard({
           [ {activeCount} ACTIVE ]
         </span>
         <span className="font-mono text-[10px] border border-white/20 px-2 py-1">
-          [ {price} HLUSD/H ]
+          [ {price} HLUSD ]
         </span>
       </div>
 

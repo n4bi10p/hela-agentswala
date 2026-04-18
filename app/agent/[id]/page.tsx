@@ -1,273 +1,249 @@
 "use client";
 
-import { TopNavBar } from "@/components/TopNavBar";
 import Link from "next/link";
-import { useState } from "react";
-import { useParams } from "next/navigation";
+import { formatUnits } from "ethers";
+import { useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { TopNavBar } from "@/components/TopNavBar";
+import {
+  activateAgent,
+  fetchAgentActivationCount,
+  fetchAgentById,
+  getPublicContractAddresses,
+  isAgentActivatedByUser,
+  type AgentStruct
+} from "@/lib/contracts";
+import { approveHLUSD, connectWallet, ensureHeLaNetwork, getConnectedAccount, persistConnectedAccount } from "@/lib/wallet";
+import { getAgentImage, parseConfigSchema, toAgentTypeLabel, type ConfigField } from "@/lib/agentUi";
 
-const AGENTS: Record<
-  string,
-  {
-    id: number;
-    name: string;
-    type: string;
-    description: string;
-    fullDescription: string;
-    image: string;
-    price: number;
-    activeCount: number;
-    isLive: boolean;
-    config: { field: string; type: string; placeholder: string }[];
+function formatChainError(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
   }
-> = {
-  "1": {
-    id: 1,
-    name: "Trading Bot",
-    type: "TRADING",
-    description:
-      "Monitors price thresholds and executes swaps across multiple liquidity pools with precision timing.",
-    fullDescription:
-      "The Trading Bot is an advanced autonomous agent that monitors price movements across multiple liquidity pools. It can execute swaps at optimal prices, set custom alerts, and simulate trade execution. Perfect for active traders and DeFi enthusiasts.",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuCP9WykVHXlBO4UR2yXu_3m-9IlbFZ2gQIcMEdQEFf9kGLNUq3OsUSKEd-VP82nlecVqwhbNq-gonLvflkS3USYdgiPjK3LnO14jyjCtsyoXoWhgddIoMD7l4mDOaljT05Z6K5HXw2-DtHyNQRWIr3YVhYzViY-zmT2_q0hdYaHqqVYeK02HmzB_BbVzpyU-W444Ddm1M8nXvvT5padIoGxZGyKmLtGHJA73rLAHpMHnKxe3z179wvZf3q8lJpEHjZkxmW_IL2iOFY",
-    price: 2.5,
-    activeCount: 24,
-    isLive: true,
-    config: [
-      {
-        field: "Token Pair",
-        type: "text",
-        placeholder: "e.g., HLUSD/ETH",
-      },
-      {
-        field: "Price Threshold",
-        type: "number",
-        placeholder: "e.g., 0.98",
-      },
-      {
-        field: "Action Type",
-        type: "select",
-        placeholder: "Alert or Execute",
-      },
-      {
-        field: "Amount",
-        type: "number",
-        placeholder: "HLUSD amount",
-      },
-    ],
-  },
-  "2": {
-    id: 2,
-    name: "Yield Orchestrator",
-    type: "FARMING",
-    description:
-      "Auto-compounds yield, monitors LP positions and suggests optimal farming strategies.",
-    fullDescription:
-      "Yield Orchestrator automatically compounds your LP yields and monitors position health. It provides real-time APY updates and recommends rebalancing actions based on market conditions.",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuCsYXxIvzCasfwu0KjYNIBqyp1bFixdCnGRqahsrugyzKTdlpaGYJekeVsoCU80cL0ClsaNm1FUZV7OHNfe7ilj-_l2COB9BDtlqOfu0HEjItghJg8n2BazGMVB6NGd_jKE5p3iIUTBOuXIBCUcdRPsNbvuOncUKAoiw2vvz28Edhtyu7cNaMo24d13vtgrzJqATCd0DPQq1HH72HD6hjJ4vCZ6_nWMAJrgRtul6oDOhyJ9D95rrWRDMpXWM8gJgn5MwzQSljgigWY",
-    price: 0.8,
-    activeCount: 812,
-    isLive: true,
-    config: [
-      {
-        field: "LP Token Address",
-        type: "text",
-        placeholder: "0x...",
-      },
-      {
-        field: "Compound Frequency",
-        type: "select",
-        placeholder: "Daily/Weekly/Monthly",
-      },
-      {
-        field: "Threshold",
-        type: "number",
-        placeholder: "Min yield to compound %",
-      },
-    ],
-  },
-  "3": {
-    id: 3,
-    name: "Social Sentinel",
-    type: "CONTENT",
-    description:
-      "Gemini-powered social media content auto-responder with tone customization.",
-    fullDescription:
-      "Social Sentinel uses Gemini AI to generate contextual replies to social media messages. Customize tone, brand voice, and response style. Get 3 reply options and pick your favorite.",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuCdvfCf5x6E9xZ1AIosqHI4a2tE0JdCcz9eA6a0Mg1XVmXbiUf9tvBcRRdtvhuLii5lPeODU7FR5BT6cbAZZOH8IW5iM6UcR9es5YxQdlDcFnKhHDEhkzm25txi8bCgKRgLbhTJdgJ4ptuZK6HaIddvX8vLhaAL8LvsrsMB3dGgrVmUAgyYqRN9SDUWaz-CfvrK2r8-dBCa57ZYpspB8HEKiGrXhWrUoI3-LDWeMc8dOjvKSHsWXCLg8frA1SnBPO4ihdmXdOGczmY",
-    price: 1.2,
-    activeCount: 12,
-    isLive: false,
-    config: [
-      {
-        field: "Tone",
-        type: "select",
-        placeholder: "Professional/Casual/Aggressive",
-      },
-      {
-        field: "Brand Context",
-        type: "textarea",
-        placeholder: "Describe your brand...",
-      },
-      {
-        field: "Language",
-        type: "select",
-        placeholder: "English/Other",
-      },
-    ],
-  },
-  "4": {
-    id: 4,
-    name: "Arb Master Z",
-    type: "TRADING",
-    description: "Advanced arbitrage detection and execution across DEX pools.",
-    fullDescription:
-      "The most advanced arbitrage detection system on HeLa. Monitors multiple DEX pools simultaneously for profitable opportunities and executes trades with minimal slippage.",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuBnv7KX2CUfHTtVNxA3N1yyGsjzDYkP_tVm03JkSp3rGuTJQF3OvgGDqR9hxevv8RomyvjQ6-OpASMXLDOTmas1e_LExvngr7iYa9-gZKbhMMtfxN2_QEUutB8pNwKVbqGnEG4pdiorgTct8ZPrxVV1m9RqZGcuRbQ1S9Pzs4Vnw9j5CXoVZVBXmQ5nwmxi5VxpPjwhUcoI6Il77MiHdn5XqHSFwI8z4rfxhVaUDWKbf80d-7E65rlm75sk4g5o6hL3I5FpuJ6K6X8",
-    price: 4.2,
-    activeCount: 56,
-    isLive: true,
-    config: [
-      {
-        field: "Min Profit Threshold %",
-        type: "number",
-        placeholder: "0.5",
-      },
-      {
-        field: "DEX Whitelist",
-        type: "text",
-        placeholder: "Comma-separated DEX names",
-      },
-      {
-        field: "Max Gas Price",
-        type: "number",
-        placeholder: "HLUSD",
-      },
-    ],
-  },
-  "5": {
-    id: 5,
-    name: "Schedule Master",
-    type: "SCHEDULING",
-    description:
-      "Recurring HLUSD payments on customizable time-based triggers.",
-    fullDescription:
-      "Set up recurring HLUSD payments on a schedule of your choice. Perfect for subscriptions, recurring expenses, or automated payouts.",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuCP9WykVHXlBO4UR2yXu_3m-9IlbFZ2gQIcMEdQEFf9kGLNUq3OsUSKEd-VP82nlecVqwhbNq-gonLvflkS3USYdgiPjK3LnO14jyjCtsyoXoWhgddIoMD7l4mDOaljT05Z6K5HXw2-DtHyNQRWIr3YVhYzViY-zmT2_q0hdYaHqqVYeK02HmzB_BbVzpyU-W444Ddm1M8nXvvT5padIoGxZGyKmLtGHJA73rLAHpMHnKxe3z179wvZf3q8lJpEHjZkxmW_IL2iOFY",
-    price: 0.5,
-    activeCount: 234,
-    isLive: true,
-    config: [
-      {
-        field: "Recipient Address",
-        type: "text",
-        placeholder: "0x...",
-      },
-      {
-        field: "Amount (HLUSD)",
-        type: "number",
-        placeholder: "100",
-      },
-      {
-        field: "Frequency",
-        type: "select",
-        placeholder: "Daily/Weekly/Monthly",
-      },
-      {
-        field: "Start Date",
-        type: "date",
-        placeholder: "YYYY-MM-DD",
-      },
-    ],
-  },
-  "6": {
-    id: 6,
-    name: "Portfolio Rebalancer",
-    type: "REBALANCING",
-    description:
-      "Monitors wallet allocation drift and suggests rebalancing trades.",
-    fullDescription:
-      "Keep your portfolio allocation optimal. The Rebalancer monitors your tokens and alerts you when allocation drifts beyond your target percentages.",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuCsYXxIvzCasfwu0KjYNIBqyp1bFixdCnGRqahsrugyzKTdlpaGYJekeVsoCU80cL0ClsaNm1FUZV7OHNfe7ilj-_l2COB9BDtlqOfu0HEjItghJg8n2BazGMVB6NGd_jKE5p3iIUTBOuXIBCUcdRPsNbvuOncUKAoiw2vvz28Edhtyu7cNaMo24d13vtgrzJqATCd0DPQq1HH72HD6hjJ4vCZ6_nWMAJrgRtul6oDOhyJ9D95rrWRDMpXWM8gJgn5MwzQSljgigWY",
-    price: 1.8,
-    activeCount: 89,
-    isLive: true,
-    config: [
-      {
-        field: "Target Allocation",
-        type: "text",
-        placeholder: "HLUSD:60%, ETH:30%, OTHER:10%",
-      },
-      {
-        field: "Drift Tolerance %",
-        type: "number",
-        placeholder: "5",
-      },
-      {
-        field: "Tokens to Monitor",
-        type: "text",
-        placeholder: "HLUSD,ETH,BTC",
-      },
-    ],
-  },
-  "7": {
-    id: 7,
-    name: "Business Assistant",
-    type: "BUSINESS",
-    description: "Gemini AI answers queries, drafts emails, and summarizes documents.",
-    fullDescription:
-      "Your AI-powered business assistant powered by Gemini. Ask questions, draft emails, summarize documents, generate reports. Perfect for busy entrepreneurs.",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuBnv7KX2CUfHTtVNxA3N1yyGsjzDYkP_tVm03JkSp3rGuTJQF3OvgGDqR9hxevv8RomyvjQ6-OpASMXLDOTmas1e_LExvngr7iYa9-gZKbhMMtfxN2_QEUutB8pNwKVbqGnEG4pdiorgTct8ZPrxVV1m9RqZGcuRbQ1S9Pzs4Vnw9j5CXoVZVBXmQ5nwmxi5VxpPjwhUcoI6Il77MiHdn5XqHSFwI8z4rfxhVaUDWKbf80d-7E65rlm75sk4g5o6hL3I5FpuJ6K6X8",
-    price: 2.0,
-    activeCount: 156,
-    isLive: true,
-    config: [
-      {
-        field: "Business Type",
-        type: "text",
-        placeholder: "e.g., SaaS, Agency, Retail",
-      },
-      {
-        field: "Industry Context",
-        type: "textarea",
-        placeholder: "Describe your industry...",
-      },
-      {
-        field: "Response Language",
-        type: "select",
-        placeholder: "English/Other",
-      },
-    ],
-  },
-};
+  return "Unexpected blockchain error";
+}
+
+function buildDefaultForm(fields: ConfigField[]) {
+  return fields.reduce<Record<string, string>>((accumulator, field) => {
+    accumulator[field.key] = "";
+    return accumulator;
+  }, {});
+}
+
+function renderField(
+  field: ConfigField,
+  value: string,
+  onChange: (key: string, nextValue: string) => void
+) {
+  const className =
+    "bg-surface-container border border-white/20 text-white placeholder-white/30 p-3 font-mono text-sm focus:outline-none focus:border-white transition-colors";
+
+  if (field.inputType === "textarea") {
+    return (
+      <textarea
+        value={value}
+        onChange={(event) => onChange(field.key, event.target.value)}
+        placeholder={field.placeholder}
+        className={className}
+        rows={4}
+      />
+    );
+  }
+
+  if (field.inputType === "select") {
+    return (
+      <select
+        value={value}
+        onChange={(event) => onChange(field.key, event.target.value)}
+        className={className}
+      >
+        <option value="">{field.placeholder}</option>
+        {(field.options || []).map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  return (
+    <input
+      type={field.inputType}
+      value={value}
+      onChange={(event) => onChange(field.key, event.target.value)}
+      placeholder={field.placeholder}
+      className={className}
+    />
+  );
+}
 
 export default function AgentDetailPage() {
   const params = useParams();
-  const agentId = params.id as string;
-  const agent = AGENTS[agentId];
+  const router = useRouter();
+  const agentId = Number(params.id);
 
+  const [agent, setAgent] = useState<AgentStruct | null>(null);
+  const [activeCount, setActiveCount] = useState(0);
+  const [account, setAccount] = useState<string | null>(null);
+  const [alreadyActivated, setAlreadyActivated] = useState(false);
   const [formData, setFormData] = useState<Record<string, string>>({});
+  const [isLoading, setIsLoading] = useState(true);
   const [isActivating, setIsActivating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
-  if (!agent) {
+  const configFields = useMemo(() => parseConfigSchema(agent?.configSchema || ""), [agent?.configSchema]);
+
+  useEffect(() => {
+    setFormData(buildDefaultForm(configFields));
+  }, [configFields]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function syncWallet() {
+      const current = await getConnectedAccount();
+      if (!cancelled) {
+        setAccount(current);
+      }
+    }
+
+    async function loadAgent() {
+      try {
+        setIsLoading(true);
+        setError(null);
+
+        const [agentRecord, count] = await Promise.all([
+          fetchAgentById(agentId),
+          fetchAgentActivationCount(agentId)
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setAgent(agentRecord);
+        setActiveCount(count);
+
+        const current = await getConnectedAccount();
+        if (cancelled) {
+          return;
+        }
+
+        setAccount(current);
+
+        if (current) {
+          const active = await isAgentActivatedByUser(current, agentId);
+          if (!cancelled) {
+            setAlreadyActivated(active);
+          }
+        } else {
+          setAlreadyActivated(false);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : "Failed to load agent");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    loadAgent();
+    syncWallet().catch(() => undefined);
+
+    const handleWalletChanged = async () => {
+      const current = await getConnectedAccount();
+      if (cancelled) {
+        return;
+      }
+      setAccount(current);
+      if (current) {
+        const active = await isAgentActivatedByUser(current, agentId).catch(() => false);
+        if (!cancelled) {
+          setAlreadyActivated(active);
+        }
+      } else {
+        setAlreadyActivated(false);
+      }
+    };
+
+    window.addEventListener("trovia:wallet-changed", handleWalletChanged as EventListener);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("trovia:wallet-changed", handleWalletChanged as EventListener);
+    };
+  }, [agentId]);
+
+  const handleInputChange = (field: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleActivate = async () => {
+    if (!agent) {
+      return;
+    }
+
+    try {
+      setIsActivating(true);
+      setError(null);
+      setStatusMessage("Checking wallet...");
+
+      await ensureHeLaNetwork();
+      const activeAccount = account || (await connectWallet());
+      persistConnectedAccount(activeAccount);
+      setAccount(activeAccount);
+
+      const escrowAddress = getPublicContractAddresses().escrow;
+
+      if (agent.priceHLUSD > 0n) {
+        setStatusMessage("Approving HLUSD spend...");
+        await approveHLUSD(escrowAddress, agent.priceHLUSD);
+      }
+
+      setStatusMessage("Submitting activation transaction...");
+      await activateAgent(agentId, JSON.stringify(formData));
+
+      setAlreadyActivated(true);
+      setActiveCount((current) => current + 1);
+      setStatusMessage("Agent activated successfully.");
+
+      router.push("/dashboard");
+    } catch (activationError) {
+      setError(formatChainError(activationError));
+      setStatusMessage(null);
+    } finally {
+      setIsActivating(false);
+    }
+  };
+
+  if (isLoading) {
     return (
       <main className="min-h-screen bg-black">
         <TopNavBar />
-        <div className="flex items-center justify-center min-h-screen pt-24">
+        <div className="flex min-h-screen items-center justify-center pt-24">
+          <p className="font-mono text-sm uppercase text-white/60">Loading on-chain agent...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (error && !agent) {
+    return (
+      <main className="min-h-screen bg-black">
+        <TopNavBar />
+        <div className="flex min-h-screen items-center justify-center pt-24">
           <div className="text-center">
-            <h1 className="font-headline text-4xl text-white mb-4">
-              AGENT NOT FOUND
-            </h1>
-            <Link
-              href="/marketplace"
-              className="text-white hover:text-white/60 transition-colors"
-            >
+            <h1 className="mb-4 font-headline text-4xl text-white">AGENT NOT AVAILABLE</h1>
+            <p className="mb-6 font-mono text-xs text-white/60">{error}</p>
+            <Link href="/marketplace" className="text-white hover:text-white/60 transition-colors">
               Back to Marketplace
             </Link>
           </div>
@@ -276,148 +252,93 @@ export default function AgentDetailPage() {
     );
   }
 
-  const handleInputChange = (field: string, value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  };
+  if (!agent) {
+    return null;
+  }
 
-  const handleActivate = async () => {
-    setIsActivating(true);
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    setIsActivating(false);
-    alert(
-      `Agent ${agent.name} activated successfully! Configuration: ${JSON.stringify(formData)}`
-    );
-  };
+  const price = Number(formatUnits(agent.priceHLUSD, 18));
 
   return (
     <main className="min-h-screen bg-black">
       <TopNavBar />
 
-      <div className="mt-24 grid grid-cols-1 lg:grid-cols-3 gap-8 p-8 max-w-7xl mx-auto">
-        {/* Left: Image and Stats */}
-        <div className="lg:col-span-1 flex flex-col gap-6">
-          <div className="w-full h-96 bg-surface-container-lowest border border-white/12 overflow-hidden">
-            <img
-              src={agent.image}
-              alt={agent.name}
-              className="w-full h-full object-cover"
-            />
+      <div className="mx-auto mt-24 grid max-w-7xl grid-cols-1 gap-8 p-8 lg:grid-cols-3">
+        <div className="flex flex-col gap-6 lg:col-span-1">
+          <div className="h-96 w-full overflow-hidden border border-white/12 bg-surface-container-lowest">
+            <img src={getAgentImage(agent.agentType)} alt={agent.name} className="h-full w-full object-cover" />
           </div>
 
-          <div className="border border-white/12 p-6 flex flex-col gap-4">
+          <div className="flex flex-col gap-4 border border-white/12 p-6">
             <div>
-              <p className="text-white/60 font-mono text-xs uppercase">
-                Active Users
-              </p>
-              <p className="font-headline text-4xl text-white">
-                {agent.activeCount}
-              </p>
+              <p className="font-mono text-xs uppercase text-white/60">Activation Count</p>
+              <p className="font-headline text-4xl text-white">{activeCount}</p>
             </div>
             <div>
-              <p className="text-white/60 font-mono text-xs uppercase">
-                Price/Hour
-              </p>
-              <p className="font-headline text-4xl text-white">
-                {agent.price} HLUSD
-              </p>
+              <p className="font-mono text-xs uppercase text-white/60">Activation Price</p>
+              <p className="font-headline text-4xl text-white">{price} HLUSD</p>
             </div>
             <div>
-              <p className="text-white/60 font-mono text-xs uppercase">
-                Status
-              </p>
-              <div
-                className={`flex items-center gap-2 mt-2 ${
-                  agent.isLive ? "text-live-signal" : "text-white/20"
-                }`}
-              >
-                <span
-                  className={`w-3 h-3 rounded-full ${
-                    agent.isLive ? "bg-live-signal" : "bg-white/20"
-                  }`}
-                ></span>
-                <span className="font-mono text-sm uppercase">
-                  {agent.isLive ? "LIVE" : "IDLE"}
-                </span>
+              <p className="font-mono text-xs uppercase text-white/60">Status</p>
+              <div className={`mt-2 flex items-center gap-2 ${agent.isActive ? "text-live-signal" : "text-white/20"}`}>
+                <span className={`h-3 w-3 rounded-full ${agent.isActive ? "bg-live-signal" : "bg-white/20"}`}></span>
+                <span className="font-mono text-sm uppercase">{agent.isActive ? "LIVE" : "IDLE"}</span>
               </div>
+            </div>
+            <div>
+              <p className="font-mono text-xs uppercase text-white/60">Developer</p>
+              <p className="mt-2 break-all font-mono text-xs text-white/80">{agent.developer}</p>
             </div>
           </div>
         </div>
 
-        {/* Right: Description and Config Form */}
-        <div className="lg:col-span-2 flex flex-col gap-6">
+        <div className="flex flex-col gap-6 lg:col-span-2">
           <div>
-            <h1 className="font-headline text-6xl text-white mb-4 uppercase">
-              {agent.name}
-            </h1>
-            <p className="text-white/60 text-sm leading-relaxed uppercase">
-              {agent.fullDescription}
-            </p>
+            <p className="mb-3 font-mono text-xs uppercase text-white/40">{toAgentTypeLabel(agent.agentType)} AGENT</p>
+            <h1 className="mb-4 font-headline text-6xl text-white uppercase">{agent.name}</h1>
+            <p className="text-sm leading-relaxed text-white/60 uppercase">{agent.description}</p>
           </div>
 
-          {/* Configuration Form */}
-          <div className="border border-white/12 p-6 flex flex-col gap-6">
-            <h2 className="font-headline text-2xl text-white uppercase">
-              Configuration
-            </h2>
+          <div className="flex flex-col gap-6 border border-white/12 p-6">
+            <h2 className="font-headline text-2xl uppercase text-white">Configuration</h2>
 
             <div className="flex flex-col gap-4">
-              {agent.config.map((configItem, idx) => (
-                <div key={idx} className="flex flex-col gap-2">
-                  <label className="font-mono text-xs text-white/60 uppercase">
-                    {configItem.field}
-                  </label>
-                  {configItem.type === "textarea" ? (
-                    <textarea
-                      placeholder={configItem.placeholder}
-                      value={formData[configItem.field] || ""}
-                      onChange={(e) =>
-                        handleInputChange(configItem.field, e.target.value)
-                      }
-                      className="bg-surface-container border border-white/20 text-white placeholder-white/30 p-3 font-mono text-sm focus:outline-none focus:border-white transition-colors"
-                      rows={3}
-                    />
-                  ) : configItem.type === "select" ? (
-                    <select
-                      value={formData[configItem.field] || ""}
-                      onChange={(e) =>
-                        handleInputChange(configItem.field, e.target.value)
-                      }
-                      className="bg-surface-container border border-white/20 text-white placeholder-white/30 p-3 font-mono text-sm focus:outline-none focus:border-white transition-colors"
-                    >
-                      <option value="">{configItem.placeholder}</option>
-                      <option value="option1">Option 1</option>
-                      <option value="option2">Option 2</option>
-                    </select>
-                  ) : (
-                    <input
-                      type={configItem.type}
-                      placeholder={configItem.placeholder}
-                      value={formData[configItem.field] || ""}
-                      onChange={(e) =>
-                        handleInputChange(configItem.field, e.target.value)
-                      }
-                      className="bg-surface-container border border-white/20 text-white placeholder-white/30 p-3 font-mono text-sm focus:outline-none focus:border-white transition-colors"
-                    />
-                  )}
+              {configFields.map((field) => (
+                <div key={field.key} className="flex flex-col gap-2">
+                  <label className="font-mono text-xs uppercase text-white/60">{field.label}</label>
+                  {renderField(field, formData[field.key] || "", handleInputChange)}
                 </div>
               ))}
             </div>
 
+            {account && (
+              <p className="font-mono text-xs uppercase text-white/40">
+                Connected Wallet: {account.slice(0, 6)}...{account.slice(-4)}
+              </p>
+            )}
+
+            {alreadyActivated && (
+              <div className="border border-live-signal/40 bg-live-signal/5 p-4">
+                <p className="font-mono text-xs uppercase text-live-signal">
+                  This wallet has already activated this agent.
+                </p>
+              </div>
+            )}
+
+            {statusMessage && <p className="font-mono text-xs uppercase text-white/50">{statusMessage}</p>}
+
+            {error && <p className="font-mono text-xs uppercase text-red-400">{error}</p>}
+
             <button
               onClick={handleActivate}
-              disabled={isActivating}
-              className="w-full bg-white text-black py-4 font-headline text-xl hover:bg-black hover:text-white hover:border hover:border-white border border-white transition-colors disabled:opacity-50 uppercase"
+              disabled={isActivating || alreadyActivated || !agent.isActive}
+              className="w-full border border-white bg-white py-4 font-headline text-xl uppercase text-black transition-colors hover:border-white hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isActivating ? "ACTIVATING..." : "[ ACTIVATE ↗ ]"}
+              {isActivating ? "ACTIVATING..." : alreadyActivated ? "[ ALREADY ACTIVE ]" : "[ ACTIVATE ↗ ]"}
             </button>
 
             <Link
               href="/marketplace"
-              className="w-full border border-white text-white py-4 font-headline text-xl hover:bg-white hover:text-black transition-colors text-center uppercase"
+              className="w-full border border-white py-4 text-center font-headline text-xl uppercase text-white transition-colors hover:bg-white hover:text-black"
             >
               [ BACK ↗ ]
             </Link>
