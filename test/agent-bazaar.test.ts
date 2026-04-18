@@ -52,6 +52,10 @@ describe("HeLa Agent Bazaar contracts", function () {
       const allAgents = await registry.getAllAgents();
       expect(allAgents.length).to.equal(1);
       expect(allAgents[0].id).to.equal(1n);
+
+      await expect(registry.connect(developer).setAgentActive(1, false))
+        .to.emit(registry, "AgentStatusUpdated")
+        .withArgs(1n, false, developer.address);
     });
 
     it("rejects invalid publish inputs", async function () {
@@ -64,6 +68,34 @@ describe("HeLa Agent Bazaar contracts", function () {
       await expect(
         registry.connect(developer).publishAgent("Trading Agent", "desc", "", 1, "{}")
       ).to.be.revertedWith("type required");
+
+      await expect(
+        registry.connect(developer).publishAgent("Trading Agent", "", "trading", 1, "{}")
+      ).to.be.revertedWith("description required");
+
+      await expect(
+        registry.connect(developer).publishAgent("Trading Agent", "desc", "invalid", 1, "{}")
+      ).to.be.revertedWith("invalid type");
+
+      await expect(
+        registry.connect(developer).publishAgent("Trading Agent", "desc", "trading", 1, "")
+      ).to.be.revertedWith("config schema required");
+    });
+
+    it("supports pagination", async function () {
+      const { registry, developer } = await loadFixture(deployFixture);
+
+      await registry.connect(developer).publishAgent("A1", "d1", "trading", 1, "{}");
+      await registry.connect(developer).publishAgent("A2", "d2", "farming", 2, "{}");
+      await registry.connect(developer).publishAgent("A3", "d3", "business", 3, "{}");
+
+      const page = await registry.getAgentsPaginated(1, 2);
+      expect(page.length).to.equal(2);
+      expect(page[0].id).to.equal(2n);
+      expect(page[1].id).to.equal(3n);
+
+      const emptyPage = await registry.getAgentsPaginated(10, 2);
+      expect(emptyPage.length).to.equal(0);
     });
 
     it("enforces ownership when toggling activity", async function () {
@@ -110,11 +142,18 @@ describe("HeLa Agent Bazaar contracts", function () {
 
       await expect(escrow.connect(buyer).activateAgent(1, '{"threshold":"0.98"}'))
         .to.emit(escrow, "AgentActivated")
-        .withArgs(1n, buyer.address, '{"threshold":"0.98"}', anyValue);
+        .withArgs(1n, 1n, buyer.address, '{"threshold":"0.98"}', price, anyValue);
 
       expect(await token.balanceOf(developer.address)).to.equal(price);
       expect(await escrow.getActivationCountForAgent(1)).to.equal(1n);
+      expect(await escrow.activationCount()).to.equal(1n);
       expect(await escrow.userActiveAgents(buyer.address, 0)).to.equal(1n);
+      expect(await escrow.getUserActiveAgentCount(buyer.address)).to.equal(1n);
+      expect(await escrow.isAgentActivatedByUser(buyer.address, 1)).to.equal(true);
+
+      const userAgents = await escrow.getUserActiveAgents(buyer.address);
+      expect(userAgents.length).to.equal(1);
+      expect(userAgents[0]).to.equal(1n);
     });
 
     it("allows free agent activation without token transfer", async function () {
@@ -130,7 +169,21 @@ describe("HeLa Agent Bazaar contracts", function () {
 
       await expect(escrow.connect(buyer).activateAgent(1, "{}"))
         .to.emit(escrow, "AgentActivated")
-        .withArgs(1n, buyer.address, "{}", anyValue);
+        .withArgs(1n, 1n, buyer.address, "{}", 0n, anyValue);
+    });
+
+    it("prevents duplicate activations for same user-agent pair", async function () {
+      const { registry, token, escrow, developer, buyer } = await loadFixture(deployFixture);
+
+      const price = ethers.parseUnits("2", 18);
+      await registry.connect(developer).publishAgent("A", "d", "content", price, "{}");
+
+      await token.mint(buyer.address, price * 2n);
+      await token.connect(buyer).approve(await escrow.getAddress(), price * 2n);
+
+      await escrow.connect(buyer).activateAgent(1, "{}");
+      await expect(escrow.connect(buyer).activateAgent(1, "{}"))
+        .to.be.revertedWith("already activated");
     });
 
     it("reverts when activation targets inactive agent", async function () {
@@ -176,12 +229,16 @@ describe("HeLa Agent Bazaar contracts", function () {
   });
 
   describe("AgentExecutor", function () {
-    it("logs execution events", async function () {
+    it("allows owner and user self-logging", async function () {
       const { executor, buyer } = await loadFixture(deployFixture);
 
       await expect(executor.logExecution(1, buyer.address, "analyze", "success"))
         .to.emit(executor, "ExecutionLogged")
         .withArgs(1n, buyer.address, "analyze", "success", anyValue);
+
+      await expect(executor.connect(buyer).logExecution(2, buyer.address, "self", "ok"))
+        .to.emit(executor, "ExecutionLogged")
+        .withArgs(2n, buyer.address, "self", "ok", anyValue);
     });
 
     it("rejects zero user in logs", async function () {
@@ -189,6 +246,38 @@ describe("HeLa Agent Bazaar contracts", function () {
 
       await expect(executor.logExecution(1, ethers.ZeroAddress, "act", "res"))
         .to.be.revertedWith("invalid user");
+    });
+
+    it("enforces authorization for third-party logging", async function () {
+      const { executor, owner, buyer, outsider } = await loadFixture(deployFixture);
+
+      await expect(executor.connect(outsider).logExecution(1, buyer.address, "act", "res"))
+        .to.be.revertedWith("not authorized logger");
+
+      await expect(executor.connect(outsider).setAuthorizedLogger(outsider.address, true))
+        .to.be.revertedWith("not owner");
+
+      await expect(executor.connect(owner).setAuthorizedLogger(outsider.address, true))
+        .to.emit(executor, "LoggerAuthorizationUpdated")
+        .withArgs(outsider.address, true);
+
+      await expect(executor.connect(outsider).logExecution(3, buyer.address, "relay", "done"))
+        .to.emit(executor, "ExecutionLogged")
+        .withArgs(3n, buyer.address, "relay", "done", anyValue);
+    });
+
+    it("allows owner transfer and validates action text", async function () {
+      const { executor, owner, buyer, outsider } = await loadFixture(deployFixture);
+
+      await expect(executor.connect(owner).setOwner(outsider.address))
+        .to.emit(executor, "OwnerUpdated")
+        .withArgs(owner.address, outsider.address);
+
+      await expect(executor.connect(owner).setAuthorizedLogger(buyer.address, true))
+        .to.be.revertedWith("not owner");
+
+      await expect(executor.connect(buyer).logExecution(1, buyer.address, "", "res"))
+        .to.be.revertedWith("action required");
     });
   });
 });

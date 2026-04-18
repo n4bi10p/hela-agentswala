@@ -2,6 +2,10 @@
 pragma solidity ^0.8.20;
 
 contract AgentRegistry {
+    uint256 private constant MAX_NAME_LENGTH = 64;
+    uint256 private constant MAX_DESCRIPTION_LENGTH = 512;
+    uint256 private constant MAX_CONFIG_SCHEMA_LENGTH = 2048;
+
     struct Agent {
         uint256 id;
         string name;
@@ -24,6 +28,8 @@ contract AgentRegistry {
         address indexed developer
     );
 
+    event AgentStatusUpdated(uint256 indexed id, bool isActive, address indexed updatedBy);
+
     function publishAgent(
         string calldata name,
         string calldata description,
@@ -32,7 +38,13 @@ contract AgentRegistry {
         string calldata configSchema
     ) external returns (uint256) {
         require(bytes(name).length > 0, "name required");
+        require(bytes(name).length <= MAX_NAME_LENGTH, "name too long");
+        require(bytes(description).length > 0, "description required");
+        require(bytes(description).length <= MAX_DESCRIPTION_LENGTH, "description too long");
         require(bytes(agentType).length > 0, "type required");
+        require(_isValidAgentType(agentType), "invalid type");
+        require(bytes(configSchema).length > 0, "config schema required");
+        require(bytes(configSchema).length <= MAX_CONFIG_SCHEMA_LENGTH, "config schema too long");
 
         agentCount += 1;
         uint256 newId = agentCount;
@@ -57,6 +69,8 @@ contract AgentRegistry {
         require(agent.id != 0, "agent not found");
         require(agent.developer == msg.sender, "not developer");
         agent.isActive = active;
+
+        emit AgentStatusUpdated(id, active, msg.sender);
     }
 
     function getAgent(uint256 id) external view returns (Agent memory) {
@@ -71,5 +85,31 @@ contract AgentRegistry {
             allAgents[i - 1] = agents[i];
         }
         return allAgents;
+    }
+
+    function getAgentsPaginated(uint256 offset, uint256 limit) external view returns (Agent[] memory) {
+        if (agentCount == 0 || limit == 0 || offset >= agentCount) {
+            return new Agent[](0);
+        }
+
+        uint256 remaining = agentCount - offset;
+        uint256 resultSize = limit < remaining ? limit : remaining;
+
+        Agent[] memory page = new Agent[](resultSize);
+        for (uint256 i = 0; i < resultSize; i++) {
+            page[i] = agents[offset + i + 1];
+        }
+        return page;
+    }
+
+    function _isValidAgentType(string calldata agentType) private pure returns (bool) {
+        bytes32 t = keccak256(bytes(agentType));
+        return
+            t == keccak256("trading") ||
+            t == keccak256("farming") ||
+            t == keccak256("scheduling") ||
+            t == keccak256("rebalancing") ||
+            t == keccak256("content") ||
+            t == keccak256("business");
     }
 }

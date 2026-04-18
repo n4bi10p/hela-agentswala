@@ -30,38 +30,38 @@ Deliverable:
 - Single source-of-truth env/config values shared with team.
 
 ## Phase 1: Contract Baseline Completion
-Status: IN PROGRESS
+Status: COMPLETE
 
 ### 1.1 AgentRegistry
-- [ ] Verify `publishAgent` input validation is complete.
-- [ ] Verify `getAgent` / `getAllAgents` behavior and gas safety for expected list size.
-- [ ] Verify activation toggle permission checks.
-- [ ] Ensure publish/toggle events contain fields needed by UI/indexing.
+- [x] Verify `publishAgent` input validation is complete.
+- [x] Verify `getAgent` / `getAllAgents` behavior and gas safety for expected list size.
+- [x] Verify activation toggle permission checks.
+- [x] Ensure publish/toggle events contain fields needed by UI/indexing.
 
 ### 1.2 AgentEscrow
-- [ ] Validate payment path: `transferFrom` buyer -> escrow -> developer.
-- [ ] Validate behavior for `priceHLUSD == 0` (free agent flow).
-- [ ] Validate activation record structure and retrieval needs.
-- [ ] Decide duplicate activation policy (allow multiple vs once-per-user-agent).
-- [ ] Emit complete activation event payload for dashboard feed.
+- [x] Validate payment path: `transferFrom` buyer -> escrow -> developer.
+- [x] Validate behavior for `priceHLUSD == 0` (free agent flow).
+- [x] Validate activation record structure and retrieval needs.
+- [x] Decide duplicate activation policy (allow multiple vs once-per-user-agent).
+- [x] Emit complete activation event payload for dashboard feed.
 
 ### 1.3 AgentExecutor
-- [ ] Decide caller restriction model:
+- [x] Decide caller restriction model:
   - Option A: public logging
   - Option B: restricted relayer/backend signer
-- [ ] Emit consistent execution events for on-chain auditability.
+- [x] Emit consistent execution events for on-chain auditability.
 
 Deliverable:
 - Contract set finalized for testnet deployment.
 
 ## Phase 2: Security and Failure Semantics
-Status: TODO
+Status: COMPLETE
 
-- [ ] Ensure all invalid states revert with clear messages.
-- [ ] Ensure no zero-address critical dependencies.
-- [ ] Ensure token transfer failures cannot silently pass.
-- [ ] Review potential replay/duplicate behavior for activation/execution logs.
-- [ ] Validate no accidental privileged methods are left open.
+- [x] Ensure all invalid states revert with clear messages.
+- [x] Ensure no zero-address critical dependencies.
+- [x] Ensure token transfer failures cannot silently pass.
+- [x] Review potential replay/duplicate behavior for activation/execution logs.
+- [x] Validate no accidental privileged methods are left open.
 
 Deliverable:
 - Hardened contracts with explicit revert behavior.
@@ -121,11 +121,16 @@ Deliverable:
 - Stable blockchain adapter layer for frontend consumption.
 
 ## Phase 6: Seed Data for Demo
-Status: TODO
+Status: COMPLETE
 
-- [ ] Create script or runbook to publish all 6 required agents.
-- [ ] Validate each agent has name/type/price/schema correctly set.
-- [ ] Ensure marketplace always has complete data set for judging.
+- [x] Create script or runbook to publish all 6 required agents.
+- [x] Validate each agent has name/type/price/schema correctly set.
+- [x] Ensure marketplace always has complete data set for judging.
+
+Latest seed run (2026-04-18):
+- Registry: `0xB24786dB9E3DCC2Fb51A3033799AB7E7B0e05a1c`
+- Published in run: 6 agents
+- Total registry count after run: 6
 
 Deliverable:
 - All six agents visible and activatable in UI.
@@ -156,9 +161,9 @@ Deliverable:
 ## Open Decisions (Resolve ASAP)
 - [x] Final chain ID (`666888`)
 - [x] HLUSD testnet address
-- [ ] AgentExecutor access control mode (public/restricted)
-- [ ] Duplicate activation behavior policy
-- [ ] Scheduling execution mode (fully on-chain vs backend-triggered execution)
+- [x] AgentExecutor access control mode (restricted relayer + self logging)
+- [x] Duplicate activation behavior policy (once-per-user-per-agent)
+- [x] Scheduling execution mode (backend-triggered execution with on-chain logging)
 
 ## Freeze Policy
 - 4:30 PM onward: no new blockchain features.
