@@ -90,13 +90,13 @@ Status: IN PROGRESS
 
 Note: Hardhat automated verification currently fails with explorer API HTML response parsing.
 Deployment addresses are confirmed live on explorer links above.
-Demo preflight check currently fails because configured `HLUSD_ADDRESS` has no contract code on testnet.
-Fixing this address and redeploying is required before paid activation demo.
+Demo preflight currently passes after switching to deployed demo HLUSD token on testnet.
 
 Latest deployment (2026-04-18):
-- AgentRegistry: https://testnet-blockexplorer.helachain.com/address/0xB24786dB9E3DCC2Fb51A3033799AB7E7B0e05a1c
-- AgentEscrow: https://testnet-blockexplorer.helachain.com/address/0x05DEf75fbA3FF426Ca0Bc49CD39D4f15CE2aa39f
-- AgentExecutor: https://testnet-blockexplorer.helachain.com/address/0x6206F2F64a2B2F1D34832C2398c50F1020D9b1C7
+- AgentRegistry: https://testnet-blockexplorer.helachain.com/address/0x539834B08c1654b598a9D0a28C883253b3C0460b
+- AgentEscrow: https://testnet-blockexplorer.helachain.com/address/0xcD15d4C76F855D367a6f3b6b3781484dE1383af8
+- AgentExecutor: https://testnet-blockexplorer.helachain.com/address/0x24072496189171977c4C6198ab0493D4D1Bf2b56
+- Demo HLUSD: https://testnet-blockexplorer.helachain.com/address/0x6fEF5d9fe6051dED5cC838feD792c36252DF12bf
 
 Deliverable:
 - Publicly verifiable deployed contracts.
@@ -130,7 +130,7 @@ Status: COMPLETE
 - [x] Ensure marketplace always has complete data set for judging.
 
 Latest seed run (2026-04-18):
-- Registry: `0xB24786dB9E3DCC2Fb51A3033799AB7E7B0e05a1c`
+- Registry: `0x539834B08c1654b598a9D0a28C883253b3C0460b`
 - Published in run: 6 agents
 - Total registry count after run: 6
 
@@ -179,7 +179,10 @@ Deliverable:
 ```bash
 npm run compile
 npm run test
+npm run deploy:hlusd-demo
 npm run deploy:hela
+npm run seed:hela
+npm run demo:check
 ```
 
 ## Working Notes
