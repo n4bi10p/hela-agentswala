@@ -80,17 +80,18 @@ Deliverable:
 - Repeatable confidence via test suite.
 
 ## Phase 4: Deployment + Verification
-Status: IN PROGRESS
+Status: COMPLETE
 
 - [x] Keep `scripts/deploy.ts` environment-driven.
 - [x] Add output summary format for quick copy to `.env.local`.
 - [x] Deploy contracts to HeLa testnet.
-- [ ] Verify all contracts on explorer.
+- [x] Verify all contracts on explorer.
 - [x] Save addresses and verification links in README/demo notes.
 
-Note: Hardhat automated verification currently fails with explorer API HTML response parsing.
-Deployment addresses are confirmed live on explorer links above.
-Demo preflight currently passes after switching to deployed demo HLUSD token on testnet.
+Note: Hardhat verify plugin is not compatible with the explorer redirect/API shape.
+Manual verification was completed through explorer API v2 endpoints (`/api/v2/smart-contracts/.../verification/via/standard-input`).
+Deployment addresses are live and now report `is_verified=true`.
+Demo preflight passes with deployed demo HLUSD token.
 
 Latest deployment (2026-04-18):
 - AgentRegistry: https://testnet-blockexplorer.helachain.com/address/0x539834B08c1654b598a9D0a28C883253b3C0460b
@@ -142,11 +143,16 @@ Status: IN PROGRESS
 
 - [ ] Connect MetaMask on HeLa.
 - [ ] Browse marketplace -> open agent details.
-- [ ] Approve HLUSD -> activate Scheduling Agent.
-- [ ] Capture tx hash and explorer link.
+- [x] Approve HLUSD -> activate Scheduling Agent.
+- [x] Capture tx hash and explorer link.
 - [ ] Run Content Reply interaction and verify log path.
 - [ ] Validate dashboard shows activations/events.
 - [x] Record fallback procedure if RPC/tx fails live.
+
+Latest activation evidence (CLI, no frontend):
+- Approval tx: `0x26bca1367a1f7f04add1d8c3436e994638d6a97108378d989e8acb1fa72ab089`
+- Activation tx: `0x348a88e5730cbf6596c63b17ca97ebb5beba35eb8241625b15a0dc0626e7c054`
+- Activation count: `0 -> 1`
 
 Implemented rehearsal tooling:
 - `npm run demo:check` for automated preflight validation (contracts, seed data, HLUSD token contract check)
