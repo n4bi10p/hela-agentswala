@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { TopNavBar } from "@/components/TopNavBar";
 import { AgentCard } from "@/components/AgentCard";
+import { useReveal, useStaggerReveal } from "@/hooks/useScrollAnimation";
 
 const AGENTS = [
   {
@@ -101,6 +102,8 @@ const AGENT_TYPES = [
 
 export default function MarketplacePage() {
   const [selectedType, setSelectedType] = useState("ALL");
+  const headerRef = useReveal(0);
+  const gridRef = useStaggerReveal(100);
 
   const filteredAgents =
     selectedType === "ALL"
@@ -112,7 +115,7 @@ export default function MarketplacePage() {
       <TopNavBar />
 
       {/* Page Header */}
-      <header className="px-8 pt-16 pb-8 border-b border-white/10 mt-24">
+      <header ref={headerRef} className="px-8 pt-16 pb-8 border-b border-white/10 mt-24 reveal-up">
         <div className="flex items-center gap-4 mb-4">
           <span className="font-mono text-sm text-white bracket-link cursor-pointer">
             MARKETPLACE
@@ -144,9 +147,11 @@ export default function MarketplacePage() {
       </section>
 
       {/* Agent Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-8">
+      <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-8">
         {filteredAgents.map((agent) => (
-          <AgentCard key={agent.id} {...agent} />
+          <div key={agent.id} data-item>
+            <AgentCard {...agent} />
+          </div>
         ))}
       </div>
 
