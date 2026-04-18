@@ -49,6 +49,15 @@ export interface AgentJobConfig {
   [key: string]: unknown;
 }
 
+export interface ExecutionPolicy {
+  autoExecute: boolean;
+  maxSpendPerRunHLUSD?: number;
+  maxDailySpendHLUSD?: number;
+  allowedTokens?: string[];
+  allowedProtocols?: string[];
+  slippageBps?: number;
+}
+
 export interface AgentJob {
   id: string;
   agentId: string;
@@ -60,6 +69,7 @@ export interface AgentJob {
   createdAt: string;
   updatedAt: string;
   userConfig: AgentJobConfig;
+  executionPolicy?: ExecutionPolicy;
   lastResult?: string;
   lastError?: string;
   lastExecutionTxHash?: string;

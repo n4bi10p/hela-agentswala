@@ -1,8 +1,12 @@
 import { Contract, JsonRpcProvider, Wallet, parseUnits } from "ethers";
 import { getExecutorContract } from "./contracts";
-import { appendExecutionLog, getStoredAgent, listDueJobs, updateAgentJob } from "./automationStore";
+import { appendExecutionLog, getAgentJob, getStoredAgent, listDueJobs, listExecutionLogsForOwner, updateAgentJob } from "./automationStore";
 import { runAgent } from "./agentRunner";
-import type { AgentJob, AutomationFrequency, ExecutionResult } from "../types/agent";
+import { callGemini } from "./gemini";
+import { getTokenPrice } from "./priceService";
+import { simulateLPPosition } from "./walletMonitor";
+import { isTemplateAutomationPlaceholder } from "./automationBootstrap";
+import type { AgentJob, AutomationFrequency, ExecutionPolicy, ExecutionResult } from "../types/agent";
 
 const ERC20_ABI = [
   "function transfer(address to, uint256 amount) returns (bool)",
@@ -38,6 +42,81 @@ function toErrorMessage(error: unknown) {
     return error.message;
   }
   return "Unknown automation error";
+}
+
+function normalizeUppercaseList(values: string[] | undefined) {
+  return values?.map((value) => value.trim().toUpperCase()).filter(Boolean) ?? [];
+}
+
+function getExecutionPolicy(job: AgentJob): ExecutionPolicy {
+  return {
+    autoExecute: job.executionPolicy?.autoExecute !== false,
+    maxSpendPerRunHLUSD: job.executionPolicy?.maxSpendPerRunHLUSD,
+    maxDailySpendHLUSD: job.executionPolicy?.maxDailySpendHLUSD,
+    slippageBps: job.executionPolicy?.slippageBps,
+    allowedTokens: normalizeUppercaseList(job.executionPolicy?.allowedTokens),
+    allowedProtocols: normalizeUppercaseList(job.executionPolicy?.allowedProtocols)
+  };
+}
+
+function enforceAllowedTokens(job: AgentJob, tokens: string[]) {
+  const policy = getExecutionPolicy(job);
+  if (!policy.allowedTokens?.length) {
+    return;
+  }
+
+  const requested = Array.from(new Set(tokens.map((token) => token.trim().toUpperCase()).filter(Boolean)));
+  const rejected = requested.filter((token) => !policy.allowedTokens?.includes(token));
+  if (rejected.length) {
+    throw new Error(`Execution policy rejected unsupported tokens: ${rejected.join(", ")}`);
+  }
+}
+
+function enforceAllowedProtocols(job: AgentJob, protocols: string[]) {
+  const policy = getExecutionPolicy(job);
+  if (!policy.allowedProtocols?.length) {
+    return;
+  }
+
+  const requested = Array.from(new Set(protocols.map((protocol) => protocol.trim().toUpperCase()).filter(Boolean)));
+  const rejected = requested.filter((protocol) => !policy.allowedProtocols?.includes(protocol));
+  if (rejected.length) {
+    throw new Error(`Execution policy rejected unsupported protocols: ${rejected.join(", ")}`);
+  }
+}
+
+function enforceSpendLimits(job: AgentJob, estimatedSpendHLUSD: number) {
+  const policy = getExecutionPolicy(job);
+
+  if (policy.autoExecute === false) {
+    throw new Error("Execution policy requires manual approval before auto-execution.");
+  }
+
+  if (
+    typeof policy.maxSpendPerRunHLUSD === "number" &&
+    estimatedSpendHLUSD > policy.maxSpendPerRunHLUSD
+  ) {
+    throw new Error(
+      `Execution policy maxSpendPerRunHLUSD exceeded (${estimatedSpendHLUSD} > ${policy.maxSpendPerRunHLUSD}).`
+    );
+  }
+
+  if (typeof policy.maxDailySpendHLUSD === "number") {
+    const today = new Date().toISOString().slice(0, 10);
+    const spentToday = listExecutionLogsForOwner(job.ownerAddress)
+      .filter((log) => log.jobId === job.id && log.success && log.executedAt.startsWith(today))
+      .reduce((total, log) => {
+        const match = log.result.match(/Estimated spend: ([0-9]+(?:\.[0-9]+)?)/i);
+        const amount = match ? Number(match[1]) : 0;
+        return total + (Number.isFinite(amount) ? amount : 0);
+      }, 0);
+
+    if (spentToday + estimatedSpendHLUSD > policy.maxDailySpendHLUSD) {
+      throw new Error(
+        `Execution policy maxDailySpendHLUSD exceeded (${(spentToday + estimatedSpendHLUSD).toFixed(4)} > ${policy.maxDailySpendHLUSD}).`
+      );
+    }
+  }
 }
 
 async function logExecutionOnChain(job: AgentJob, result: ExecutionResult) {
@@ -94,6 +173,238 @@ async function executeSchedulingTransfer(job: AgentJob) {
   } satisfies ExecutionResult;
 }
 
+function readText(config: AgentJob["userConfig"], keys: string[], fallback = ""): string {
+  for (const key of keys) {
+    const value = config[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return fallback;
+}
+
+function readNumber(config: AgentJob["userConfig"], keys: string[], fallback: number): number {
+  for (const key of keys) {
+    const value = config[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string") {
+      const parsed = Number(value.trim().replace("%", ""));
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return fallback;
+}
+
+function parseMap(value: unknown, fallback: Record<string, number>): Record<string, number> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .map(([key, raw]) => {
+        const parsed = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw.replace("%", "")) : NaN;
+        return Number.isFinite(parsed) ? [key.toUpperCase(), parsed] : null;
+      })
+      .filter((entry): entry is [string, number] => entry !== null);
+
+    if (entries.length) {
+      return Object.fromEntries(entries);
+    }
+  }
+
+  if (typeof value === "string" && value.includes(":")) {
+    const entries = value
+      .split(",")
+      .map((segment) => segment.trim())
+      .filter(Boolean)
+      .map((segment) => {
+        const [key, raw] = segment.split(":").map((part) => part.trim());
+        const parsed = Number((raw || "").replace("%", ""));
+        return key && Number.isFinite(parsed) ? [key.toUpperCase(), parsed] as [string, number] : null;
+      })
+      .filter((entry): entry is [string, number] => entry !== null);
+
+    if (entries.length) {
+      return Object.fromEntries(entries);
+    }
+  }
+
+  return fallback;
+}
+
+async function executeContentAutomation(job: AgentJob): Promise<ExecutionResult> {
+  const topic = readText(job.userConfig, ["topic", "prompt", "message", "Sample Message"], "integration update");
+  const tone = readText(job.userConfig, ["tone", "Tone"], "professional");
+  const brandContext = readText(job.userConfig, ["brandContext", "Brand Context"], "general brand context");
+
+  const result = await callGemini(
+    `Write one concise social response idea about "${topic}" in a ${tone} tone. Brand context: ${brandContext}.`,
+    "Return one short practical reply with no markdown."
+  ).catch(() => `Prepared a ${tone} content response for: ${topic}`);
+
+  return {
+    success: true,
+    result,
+    executedAt: new Date().toISOString()
+  };
+}
+
+async function executeBusinessAutomation(job: AgentJob): Promise<ExecutionResult> {
+  const query = readText(job.userConfig, ["query", "prompt", "Query"], "Summarize business priorities for this week.");
+  const context = readText(job.userConfig, ["businessContext", "context", "Industry Context"], "general business context");
+
+  const result = await callGemini(
+    `Business context: ${context}\nRequest: ${query}\nReturn a concise practical answer with 3 action steps.`,
+    "You are a concise business advisor. No markdown tables."
+  ).catch(() => `Business guidance prepared for: ${query}`);
+
+  return {
+    success: true,
+    result,
+    executedAt: new Date().toISOString()
+  };
+}
+
+const TOKEN_TO_COINGECKO: Record<string, string> = {
+  btc: "bitcoin",
+  bitcoin: "bitcoin",
+  eth: "ethereum",
+  ethereum: "ethereum",
+  usdc: "usd-coin",
+  usdt: "tether",
+  dai: "dai",
+  link: "chainlink",
+  hlusd: "usd-coin"
+};
+
+async function executeTradingAutomation(job: AgentJob): Promise<ExecutionResult> {
+  const tokenPair = readText(job.userConfig, ["tokenPair", "Token Pair"], "btc/usdc").toLowerCase();
+  const thresholdPrice = readNumber(job.userConfig, ["thresholdPrice", "Price Threshold"], 60000);
+  const currentPriceInput = readNumber(job.userConfig, ["currentPrice", "Current Price"], NaN);
+  const direction = readText(job.userConfig, ["direction", "Action Type"], "above").toLowerCase() === "below" ? "below" : "above";
+  const action = readText(job.userConfig, ["action"], "alert").toLowerCase() === "simulate-swap" ? "simulate-swap" : "alert";
+  const amount = readNumber(job.userConfig, ["amount", "Amount"], 1);
+  const tokens = tokenPair.split(/[/:_\-\s]+/).filter(Boolean);
+  enforceAllowedTokens(job, tokens);
+  enforceSpendLimits(job, amount);
+  const baseToken = tokenPair.split(/[/:_\-\s]+/)[0];
+  const resolved = TOKEN_TO_COINGECKO[baseToken] || "bitcoin";
+  const currentPrice = Number.isFinite(currentPriceInput) ? currentPriceInput : await getTokenPrice(resolved).catch(() => thresholdPrice);
+  const triggered = direction === "above" ? currentPrice >= thresholdPrice : currentPrice <= thresholdPrice;
+  const analysis = triggered
+    ? `${tokenPair.toUpperCase()} crossed the ${direction} threshold at ${currentPrice}. Estimated spend: ${amount}.`
+    : `${tokenPair.toUpperCase()} has not crossed the ${direction} threshold yet. Current price is ${currentPrice}.`;
+
+  return {
+    success: true,
+    result: analysis,
+    data: {
+      tokenPair,
+      currentPrice,
+      thresholdPrice,
+      direction,
+      triggered,
+      action,
+      amount,
+      executionMode: action === "simulate-swap" ? "policy-guarded-simulation" : "alert-only"
+    },
+    executedAt: new Date().toISOString()
+  };
+}
+
+async function executeFarmingAutomation(job: AgentJob): Promise<ExecutionResult> {
+  const protocol = readText(job.userConfig, ["protocol", "LP Token Address"], "demo-farm");
+  const poolType = readText(job.userConfig, ["poolType"], "hlusd-usdc");
+  const amount = readNumber(job.userConfig, ["amount", "Threshold"], 100);
+  const durationDays = readNumber(job.userConfig, ["durationDays"], 30);
+  enforceAllowedProtocols(job, [protocol]);
+  enforceAllowedTokens(job, poolType.split(/[/:_\-\s]+/).filter(Boolean));
+  enforceSpendLimits(job, amount);
+  const lpData = await simulateLPPosition(`${protocol}:${poolType}`);
+  const projectedEarnings = Number((amount * (lpData.apy / 100) * (durationDays / 365)).toFixed(6));
+
+  return {
+    success: true,
+    result: `Farming review for ${protocol}/${poolType}: APY ${lpData.apy}% with projected earnings ${projectedEarnings}. Estimated spend: ${amount}.`,
+    data: {
+      protocol,
+      poolType,
+      projectedEarnings,
+      apy: lpData.apy,
+      amount,
+      executionMode: "policy-guarded-monitoring"
+    },
+    executedAt: new Date().toISOString()
+  };
+}
+
+async function executeRebalancingAutomation(job: AgentJob): Promise<ExecutionResult> {
+  const target = parseMap(job.userConfig.targetAllocations ?? job.userConfig["Target Allocation"], { USDC: 60, WETH: 40 });
+  const current = parseMap(job.userConfig.currentAllocations ?? job.userConfig["Current Allocation"], { USDC: 55, WETH: 45 });
+  const driftTolerance = readNumber(job.userConfig, ["driftTolerance", "Drift Tolerance %"], 5);
+  const symbols = Array.from(new Set([...Object.keys(target), ...Object.keys(current)])).sort();
+  enforceAllowedTokens(job, symbols);
+
+  const requiredTrades = symbols
+    .map((symbol) => {
+      const deviation = Number(((current[symbol] ?? 0) - (target[symbol] ?? 0)).toFixed(4));
+      if (Math.abs(deviation) <= driftTolerance) {
+        return null;
+      }
+      return deviation > 0 ? `SELL ${Math.abs(deviation)}% ${symbol}` : `BUY ${Math.abs(deviation)}% ${symbol}`;
+    })
+    .filter((item): item is string => Boolean(item));
+  const estimatedSpend = Number(
+    requiredTrades.reduce((total, trade) => {
+      const match = trade.match(/([0-9]+(?:\.[0-9]+)?)%/i);
+      const amount = match ? Number(match[1]) : 0;
+      return total + (Number.isFinite(amount) ? amount : 0);
+    }, 0).toFixed(4)
+  );
+  enforceSpendLimits(job, estimatedSpend);
+
+  return {
+    success: true,
+    result: requiredTrades.length
+      ? `Rebalance needed: ${requiredTrades.join(" | ")}. Estimated spend: ${estimatedSpend}.`
+      : "Portfolio is within the configured drift tolerance.",
+    data: {
+      target,
+      current,
+      driftTolerance,
+      requiredTrades,
+      estimatedSpend,
+      executionMode: "policy-guarded-rebalance-plan"
+    },
+    executedAt: new Date().toISOString()
+  };
+}
+
+async function executeTemplateAutomation(job: AgentJob, agentType: string): Promise<ExecutionResult> {
+  if (agentType === "content") {
+    return executeContentAutomation(job);
+  }
+  if (agentType === "business") {
+    return executeBusinessAutomation(job);
+  }
+  if (agentType === "trading") {
+    return executeTradingAutomation(job);
+  }
+  if (agentType === "farming") {
+    return executeFarmingAutomation(job);
+  }
+  if (agentType === "rebalancing") {
+    return executeRebalancingAutomation(job);
+  }
+
+  return {
+    success: false,
+    result: `No automation handler found for agent type: ${agentType}`,
+    executedAt: new Date().toISOString()
+  };
+}
+
 async function executeJob(job: AgentJob) {
   const storedAgent = getStoredAgent(job.agentId);
   if (!storedAgent) {
@@ -104,10 +415,23 @@ async function executeJob(job: AgentJob) {
     return executeSchedulingTransfer(job);
   }
 
+  if (isTemplateAutomationPlaceholder(storedAgent.executionCode)) {
+    return executeTemplateAutomation(job, storedAgent.agent.agentType);
+  }
+
   return runAgent(job.agentId, job.userConfig);
 }
 
 export async function processJob(job: AgentJob) {
+  return processJobWithOptions(job);
+}
+
+type ProcessJobOptions = {
+  preserveStatus?: boolean;
+  preserveNextRunAt?: boolean;
+};
+
+async function processJobWithOptions(job: AgentJob, options: ProcessJobOptions = {}) {
   const startedAt = new Date();
 
   try {
@@ -117,8 +441,8 @@ export async function processJob(job: AgentJob) {
 
     updateAgentJob(job.id, (current) => ({
       ...current,
-      status: "active",
-      nextRunAt,
+      status: options.preserveStatus ? current.status : "active",
+      nextRunAt: options.preserveNextRunAt ? current.nextRunAt : nextRunAt,
       lastRunAt: startedAt.toISOString(),
       lastResult: result.result,
       lastError: undefined,
@@ -165,6 +489,19 @@ export async function processJob(job: AgentJob) {
       error: message
     };
   }
+}
+
+export async function processJobById(jobId: string) {
+  const job = getAgentJob(jobId);
+  if (!job) {
+    throw new Error("Automation job not found");
+  }
+
+  const preserveStatus = job.status === "paused";
+  return processJobWithOptions(job, {
+    preserveStatus,
+    preserveNextRunAt: preserveStatus
+  });
 }
 
 export async function processDueJobs(referenceTime = new Date().toISOString()) {

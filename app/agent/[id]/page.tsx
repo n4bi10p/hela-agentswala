@@ -163,7 +163,7 @@ const AGENTS: Record<
 };
 
 const FIELD_SELECT_OPTIONS: Record<string, string[]> = {
-  "Action Type": ["buy", "sell", "hold"],
+  "Action Type": ["above", "below", "alert"],
   "Compound Frequency": ["daily", "weekly", "monthly"],
   Tone: ["professional", "casual", "aggressive"],
   Language: ["English", "Hindi", "Spanish"],
@@ -176,6 +176,14 @@ const FAUCET_URL = "https://testnet-faucet.helachain.com/";
 
 type AgentProfile = (typeof AGENTS)[string];
 type AutomationFrequency = "hourly" | "daily" | "weekly" | "monthly";
+type ExecutionPolicyDraft = {
+  autoExecute: boolean;
+  maxSpendPerRunHLUSD: string;
+  maxDailySpendHLUSD: string;
+  allowedTokens: string;
+  allowedProtocols: string;
+  slippageBps: string;
+};
 
 type RemoteAgent = {
   id: number;
@@ -203,6 +211,13 @@ type CreatedJobResponse = {
     status: string;
   };
   agentWalletAddress: string;
+  balanceHLUSD?: string | null;
+  nativeBalanceHELA?: string | null;
+  recommendedMinimumHLUSD?: string | null;
+  gasFundingStatus?: "missing" | "low" | "ready" | "unknown";
+  gasHint?: string;
+  fundingStatus?: "empty" | "low" | "funded" | "unknown";
+  fundingHint?: string;
 };
 
 type AutomationAgentState = {
@@ -213,6 +228,36 @@ type AutomationAgentState = {
     status: "active" | "paused";
     deployedAt: string;
   } | null;
+};
+
+type AutomationJobView = {
+  id: string;
+  agentId: string;
+  ownerAddress: string;
+  frequency: AutomationFrequency;
+  nextRunAt: string;
+  lastRunAt?: string;
+  status: "active" | "paused" | "error";
+  userConfig: Record<string, unknown>;
+  lastResult?: string;
+  lastError?: string;
+  lastExecutionTxHash?: string;
+  agentWalletAddress: string | null;
+  balanceHLUSD?: string | null;
+  nativeBalanceHELA?: string | null;
+  recommendedMinimumHLUSD?: string | null;
+  gasFundingStatus?: "missing" | "low" | "ready" | "unknown";
+  gasHint?: string;
+  fundingStatus?: "empty" | "low" | "funded" | "unknown";
+  fundingHint?: string;
+  executionPolicy?: {
+    autoExecute?: boolean;
+    maxSpendPerRunHLUSD?: number;
+    maxDailySpendHLUSD?: number;
+    allowedTokens?: string[];
+    allowedProtocols?: string[];
+    slippageBps?: number;
+  };
 };
 
 type ActivationRequest = {
@@ -309,45 +354,195 @@ function normalizeDateToIso(value: string): string {
   return parsed.toISOString();
 }
 
-function buildActivationRequest(agentId: string, formData: Record<string, string>): ActivationRequest {
-  if (agentId === "1") {
-    const thresholdPrice = parseRequiredNumber(formData, "Price Threshold");
-    const amount = parseRequiredNumber(formData, "Amount");
-    const currentPriceRaw = readField(formData, "Current Price");
+function getAutomationReadiness(job: AutomationJobView): {
+  label: string;
+  className: string;
+} {
+  if (job.fundingStatus === "funded" && job.gasFundingStatus === "ready") {
+    return {
+      label: "READY TO RUN",
+      className: "text-emerald-300 border-emerald-300/50 bg-emerald-300/10"
+    };
+  }
+
+  if (job.gasFundingStatus === "missing" || job.gasFundingStatus === "low") {
+    return {
+      label: "NEEDS GAS",
+      className: "text-yellow-300 border-yellow-300/50 bg-yellow-300/10"
+    };
+  }
+
+  if (job.fundingStatus === "empty" || job.fundingStatus === "low") {
+    return {
+      label: "NEEDS HLUSD",
+      className: "text-red-300 border-red-300/50 bg-red-300/10"
+    };
+  }
+
+  return {
+    label: "CHECK FUNDING",
+    className: "text-white/70 border-white/20 bg-white/5"
+  };
+}
+
+function formatWalletBalance(job: AutomationJobView): string {
+  if (job.recommendedMinimumHLUSD === "0") {
+    return "N/A (not required)";
+  }
+
+  return `${job.balanceHLUSD || "0"} HLUSD`;
+}
+
+function supportsExecutionPolicy(agentType: string): boolean {
+  return ["TRADING", "FARMING", "REBALANCING"].includes(agentType.toUpperCase());
+}
+
+function buildDefaultExecutionPolicy(agentType: string): ExecutionPolicyDraft {
+  const normalized = agentType.toUpperCase();
+
+  if (normalized === "TRADING") {
+    return {
+      autoExecute: true,
+      maxSpendPerRunHLUSD: "2",
+      maxDailySpendHLUSD: "5",
+      allowedTokens: "BTC,USDC",
+      allowedProtocols: "",
+      slippageBps: "100"
+    };
+  }
+
+  if (normalized === "FARMING") {
+    return {
+      autoExecute: true,
+      maxSpendPerRunHLUSD: "100",
+      maxDailySpendHLUSD: "300",
+      allowedTokens: "HLUSD,USDC",
+      allowedProtocols: "UNISWAP-V3",
+      slippageBps: "100"
+    };
+  }
+
+  if (normalized === "REBALANCING") {
+    return {
+      autoExecute: true,
+      maxSpendPerRunHLUSD: "25",
+      maxDailySpendHLUSD: "100",
+      allowedTokens: "USDC,WETH",
+      allowedProtocols: "",
+      slippageBps: "150"
+    };
+  }
+
+  return {
+    autoExecute: true,
+    maxSpendPerRunHLUSD: "",
+    maxDailySpendHLUSD: "",
+    allowedTokens: "",
+    allowedProtocols: "",
+    slippageBps: ""
+  };
+}
+
+function buildExecutionPolicyPayload(policy: ExecutionPolicyDraft) {
+  const toNumber = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
+
+  const toList = (value: string) => {
+    const items = value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return items.length ? items : undefined;
+  };
+
+  return {
+    autoExecute: policy.autoExecute,
+    maxSpendPerRunHLUSD: toNumber(policy.maxSpendPerRunHLUSD),
+    maxDailySpendHLUSD: toNumber(policy.maxDailySpendHLUSD),
+    allowedTokens: toList(policy.allowedTokens),
+    allowedProtocols: toList(policy.allowedProtocols),
+    slippageBps: toNumber(policy.slippageBps)
+  };
+}
+
+function readFirstField(formData: Record<string, string>, keys: string[]): string {
+  for (const key of keys) {
+    const value = readField(formData, key);
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function parseNumberFromAliases(formData: Record<string, string>, keys: string[], fallback?: number): number {
+  const raw = readFirstField(formData, keys);
+  if (!raw) {
+    if (typeof fallback === "number") {
+      return fallback;
+    }
+    throw new Error(`${keys[0]} is required.`);
+  }
+
+  const parsed = Number(raw.replace("%", ""));
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`${keys[0]} must be a valid number.`);
+  }
+  return parsed;
+}
+
+function buildActivationRequest(agentType: string, agentId: string, formData: Record<string, string>): ActivationRequest {
+  const normalizedType = agentType.trim().toUpperCase();
+
+  if (normalizedType === "TRADING") {
+    const thresholdPrice = parseNumberFromAliases(formData, ["Price Threshold", "threshold", "thresholdPrice"], 60000);
+    const amount = parseNumberFromAliases(formData, ["Amount", "amount"], 1);
+    const currentPriceRaw = readFirstField(formData, ["Current Price", "currentPrice"]);
     const currentPrice = currentPriceRaw ? Number(currentPriceRaw) : thresholdPrice;
 
     if (!Number.isFinite(currentPrice)) {
       throw new Error("Current Price must be a valid number.");
     }
 
+    const actionType = (readFirstField(formData, ["Action Type", "action", "direction"]) || "above").toLowerCase();
+    const direction = actionType === "below" ? "below" : "above";
+    const action = actionType === "alert" ? "alert" : "simulate-swap";
+
     return {
       endpoint: "/api/agents/trading",
       payload: {
-        tokenPair: readField(formData, "Token Pair") || "HLUSD/ETH",
+        tokenPair: readFirstField(formData, ["Token Pair", "tokenPair"]) || "HLUSD/ETH",
         thresholdPrice,
         currentPrice,
-        action: (readField(formData, "Action Type") || "buy").toLowerCase(),
+        direction,
+        action,
         amount
       }
     };
   }
 
-  if (agentId === "2") {
-    const compoundThreshold = parseRequiredNumber(formData, "Threshold");
-    const currentAPYRaw = readField(formData, "Current APY");
+  if (normalizedType === "FARMING") {
+    const compoundThreshold = parseNumberFromAliases(formData, ["Threshold", "compoundThreshold", "amount"], 100);
+    const currentAPYRaw = readFirstField(formData, ["Current APY", "currentAPY"]);
     const currentAPY = currentAPYRaw ? Number(currentAPYRaw) : compoundThreshold + 1;
 
     if (!Number.isFinite(currentAPY)) {
       throw new Error("Current APY must be a valid number.");
     }
 
-    const lpAddress = readField(formData, "LP Token Address") || "0x0000000000000000000000000000000000000000";
+    const lpAddress = readFirstField(formData, ["LP Token Address", "lpAddress", "poolType"]) || "hlusd-usdc";
     const riskLevel = currentAPY >= compoundThreshold + 10 ? "high" : currentAPY >= compoundThreshold ? "medium" : "low";
 
     return {
       endpoint: "/api/agents/farming",
       payload: {
-        protocol: "yield-orchestrator",
+        protocol: readFirstField(formData, ["protocol"]) || "yield-orchestrator",
         poolType: lpAddress,
         amount: compoundThreshold,
         durationDays: 30,
@@ -356,61 +551,52 @@ function buildActivationRequest(agentId: string, formData: Record<string, string
     };
   }
 
-  if (agentId === "3") {
+  if (normalizedType === "CONTENT") {
     return {
       endpoint: "/api/agents/content",
       payload: {
-        message:
-          readField(formData, "Sample Message") ||
+        message: readFirstField(formData, ["Sample Message", "message", "topic", "prompt"]) ||
           "Thanks for your message. Can we continue this conversation?",
-        tone: (readField(formData, "Tone") || "professional").toLowerCase(),
-        brandContext: readField(formData, "Brand Context") || "General brand context"
+        tone: (readFirstField(formData, ["Tone", "tone"]) || "professional").toLowerCase(),
+        brandContext: readFirstField(formData, ["Brand Context", "brandContext", "persona"]) || "General brand context"
       }
     };
   }
 
-  if (agentId === "4") {
-    const thresholdPrice = parseRequiredNumber(formData, "Min Profit Threshold %");
-    const amount = parseRequiredNumber(formData, "Max Gas Price");
-
-    return {
-      endpoint: "/api/agents/trading",
-      payload: {
-        tokenPair: readField(formData, "Token Pair") || "HLUSD/ETH",
-        thresholdPrice,
-        currentPrice: thresholdPrice,
-        action: "buy",
-        amount
-      }
-    };
-  }
-
-  if (agentId === "5") {
-    const amount = parseRequiredNumber(formData, "Amount (HLUSD)");
-    const frequencyRaw = readField(formData, "Frequency").toLowerCase();
+  if (normalizedType === "SCHEDULING") {
+    const amount = parseNumberFromAliases(
+      formData,
+      ["Amount (HLUSD)", "amount", "stipendAmountHLUSD", "Monthly Stipend Amount (HLUSD)"],
+      1
+    );
+    const frequencyRaw = readFirstField(formData, ["Frequency", "frequency"]).toLowerCase();
     const frequency = ["hourly", "daily", "weekly", "monthly"].includes(frequencyRaw)
       ? frequencyRaw
       : "daily";
+    const startDate = readFirstField(formData, ["Start Date", "startDate"]);
 
     return {
       endpoint: "/api/agents/scheduling",
       payload: {
-        recipient: readField(formData, "Recipient Address"),
+        recipient: readFirstField(
+          formData,
+          ["Recipient Address", "recipient", "recipientAddress", "Recipient Wallet Address"]
+        ),
         amount,
         frequency,
-        startDate: normalizeDateToIso(readField(formData, "Start Date"))
+        startDate: normalizeDateToIso(startDate || new Date().toISOString())
       }
     };
   }
 
-  if (agentId === "6") {
-    const targetRaw = readField(formData, "Target Allocation");
+  if (normalizedType === "REBALANCING") {
+    const targetRaw = readFirstField(formData, ["Target Allocation", "targets", "targetAllocations"]);
     const targetAllocations = parseAllocationMap(targetRaw);
     if (!Object.keys(targetAllocations).length) {
       throw new Error("Target Allocation must include at least one token:value pair.");
     }
 
-    const currentRaw = readField(formData, "Current Allocation");
+    const currentRaw = readFirstField(formData, ["Current Allocation", "currentAllocations"]);
     const currentAllocations = Object.keys(parseAllocationMap(currentRaw)).length
       ? parseAllocationMap(currentRaw)
       : deriveCurrentAllocations(targetAllocations);
@@ -420,22 +606,21 @@ function buildActivationRequest(agentId: string, formData: Record<string, string
       payload: {
         targetAllocations,
         currentAllocations,
-        driftTolerance: parseRequiredNumber(formData, "Drift Tolerance %")
+        driftTolerance: parseNumberFromAliases(formData, ["Drift Tolerance %", "driftTolerance"], 5)
       }
     };
   }
 
-  if (agentId === "7") {
-    const businessType = readField(formData, "Business Type") || "general";
+  if (normalizedType === "BUSINESS") {
+    const businessType = readFirstField(formData, ["Business Type", "businessContext"]) || "general";
     return {
       endpoint: "/api/agents/business",
       payload: {
-        query:
-          readField(formData, "Query") ||
+        query: readFirstField(formData, ["Query", "query", "userTextInput"]) ||
           `Give three practical growth actions for a ${businessType} business.`,
-        businessContext: readField(formData, "Industry Context") || businessType,
-        language: readField(formData, "Response Language") || "English",
-        formality: (readField(formData, "Formality") || "formal").toLowerCase()
+        businessContext: readFirstField(formData, ["Industry Context", "businessContext"]) || businessType,
+        language: readFirstField(formData, ["Response Language", "language"]) || "English",
+        formality: (readFirstField(formData, ["Formality", "formality"]) || "formal").toLowerCase()
       }
     };
   }
@@ -479,6 +664,12 @@ export default function AgentDetailPage() {
   const [isCreatingJob, setIsCreatingJob] = useState(false);
   const [automationFrequency, setAutomationFrequency] = useState<AutomationFrequency>("daily");
   const [createdJob, setCreatedJob] = useState<CreatedJobResponse | null>(null);
+  const [existingJob, setExistingJob] = useState<AutomationJobView | null>(null);
+  const [activeJobActionId, setActiveJobActionId] = useState<string | null>(null);
+  const [isFundingGas, setIsFundingGas] = useState(false);
+  const [executionPolicy, setExecutionPolicy] = useState<ExecutionPolicyDraft>(() =>
+    buildDefaultExecutionPolicy(localAgent?.type || "")
+  );
 
   useEffect(() => {
     let active = true;
@@ -512,19 +703,45 @@ export default function AgentDetailPage() {
           }
         }
 
+        const currentAccount = await getConnectedAccount().catch(() => null);
+        let nextExistingJob: AutomationJobView | null = null;
+        if (currentAccount) {
+          const jobsResponse = await fetch(
+            `/api/automation/jobs?ownerAddress=${encodeURIComponent(currentAccount)}`,
+            {
+              method: "GET",
+              cache: "no-store"
+            }
+          ).catch(() => null);
+
+          if (jobsResponse && jobsResponse.ok) {
+            const jobsPayload = (await jobsResponse.json()) as { jobs?: AutomationJobView[] };
+            nextExistingJob =
+              jobsPayload.jobs?.find((job) => String(job.agentId) === String(agentId)) || null;
+          }
+        }
+
         if (active) {
           setAgentFromBackend(toAgentProfile(agentData.agent));
           setAutomationState(nextAutomationState);
+          setExistingJob(nextExistingJob);
           if (nextAutomationState?.storedAgent) {
             setCreatedJob((current) =>
               current || {
                 job: {
-                  id: "",
-                  frequency: "daily",
-                  nextRunAt: "",
-                  status: nextAutomationState.storedAgent?.status || "active"
+                  id: nextExistingJob?.id || "",
+                  frequency: nextExistingJob?.frequency || "daily",
+                  nextRunAt: nextExistingJob?.nextRunAt || "",
+                  status: nextExistingJob?.status || nextAutomationState.storedAgent?.status || "active"
                 },
-                agentWalletAddress: nextAutomationState.storedAgent.agentWalletAddress
+                agentWalletAddress: nextAutomationState.storedAgent.agentWalletAddress,
+                balanceHLUSD: nextExistingJob?.balanceHLUSD || null,
+                nativeBalanceHELA: nextExistingJob?.nativeBalanceHELA || null,
+                recommendedMinimumHLUSD: nextExistingJob?.recommendedMinimumHLUSD || null,
+                gasFundingStatus: nextExistingJob?.gasFundingStatus || "unknown",
+                gasHint: nextExistingJob?.gasHint || undefined,
+                fundingStatus: nextExistingJob?.fundingStatus || "unknown",
+                fundingHint: nextExistingJob?.fundingHint || undefined
               }
             );
           }
@@ -548,10 +765,24 @@ export default function AgentDetailPage() {
   }, [agentId]);
 
   const agent = useMemo(() => agentFromBackend || localAgent || null, [agentFromBackend, localAgent]);
+  const automationAgentType = agentFromBackend?.type || localAgent?.type || "";
+
+  useEffect(() => {
+    if (automationAgentType) {
+      setExecutionPolicy(buildDefaultExecutionPolicy(automationAgentType));
+    }
+  }, [automationAgentType]);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData((prev) => ({
       ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleExecutionPolicyChange = (field: keyof ExecutionPolicyDraft, value: string | boolean) => {
+    setExecutionPolicy((current) => ({
+      ...current,
       [field]: value
     }));
   };
@@ -566,7 +797,7 @@ export default function AgentDetailPage() {
     setIsActivating(true);
 
     try {
-      const { endpoint, payload } = buildActivationRequest(agentId, formData);
+      const { endpoint, payload } = buildActivationRequest(agent.type, agentId, formData);
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
@@ -611,7 +842,10 @@ export default function AgentDetailPage() {
           ownerAddress: account,
           frequency: automationFrequency,
           nextRunAt: new Date().toISOString(),
-          userConfig: formData
+          userConfig: formData,
+          executionPolicy: supportsExecutionPolicy(agent.type)
+            ? buildExecutionPolicyPayload(executionPolicy)
+            : undefined
         })
       });
 
@@ -621,6 +855,23 @@ export default function AgentDetailPage() {
       }
 
       setCreatedJob(payload);
+      setExistingJob({
+        ...payload.job,
+        agentId: String(agentId),
+        ownerAddress: account,
+        userConfig: formData,
+        agentWalletAddress: payload.agentWalletAddress,
+        balanceHLUSD: payload.balanceHLUSD || null,
+        nativeBalanceHELA: payload.nativeBalanceHELA || null,
+        recommendedMinimumHLUSD: payload.recommendedMinimumHLUSD || null,
+        gasFundingStatus: payload.gasFundingStatus || "unknown",
+        gasHint: payload.gasHint,
+        fundingStatus: payload.fundingStatus || "unknown",
+        fundingHint: payload.fundingHint,
+        lastResult: undefined,
+        lastError: undefined,
+        lastExecutionTxHash: undefined
+      });
       setAutomationState((current) => ({
         automationReady: true,
         storedAgent: {
@@ -630,12 +881,167 @@ export default function AgentDetailPage() {
           deployedAt: current?.storedAgent?.deployedAt || new Date().toISOString()
         }
       }));
-      setAutomationStatus("Automation job created. Fund the agent wallet so it can run on schedule.");
+      setAutomationStatus(
+        supportsExecutionPolicy(agent.type)
+          ? "Automation job created with execution guardrails. Review funding and readiness below."
+          : "Automation job created. Review funding and readiness below."
+      );
     } catch (error: unknown) {
       setAutomationError(error instanceof Error ? error.message : "Failed to create automation job.");
       setAutomationStatus(null);
     } finally {
       setIsCreatingJob(false);
+    }
+  };
+
+  const refreshExistingJob = async (jobId: string) => {
+    const response = await fetch(`/api/automation/jobs/${jobId}`, {
+      method: "GET",
+      cache: "no-store"
+    });
+
+    const payload = (await response.json()) as {
+      job?: AutomationJobView;
+      balanceHLUSD?: string | null;
+      nativeBalanceHELA?: string | null;
+      recommendedMinimumHLUSD?: string | null;
+      gasFundingStatus?: "missing" | "low" | "ready" | "unknown";
+      gasHint?: string;
+      fundingStatus?: "empty" | "low" | "funded" | "unknown";
+      fundingHint?: string;
+      error?: string;
+    };
+
+    if (!response.ok || !payload.job) {
+      throw new Error(payload.error || "Failed to refresh automation job.");
+    }
+
+    const nextJob: AutomationJobView = {
+      ...payload.job,
+      agentWalletAddress:
+        existingJob?.agentWalletAddress ||
+        createdJob?.agentWalletAddress ||
+        automationState?.storedAgent?.agentWalletAddress ||
+        null,
+      balanceHLUSD: payload.balanceHLUSD || null,
+      nativeBalanceHELA: payload.nativeBalanceHELA || null,
+      recommendedMinimumHLUSD: payload.recommendedMinimumHLUSD || null,
+      gasFundingStatus: payload.gasFundingStatus || "unknown",
+      gasHint: payload.gasHint,
+      fundingStatus: payload.fundingStatus || "unknown",
+      fundingHint: payload.fundingHint
+    };
+
+    setExistingJob(nextJob);
+    setCreatedJob((current) =>
+      current
+        ? {
+            ...current,
+            job: {
+              id: nextJob.id,
+              frequency: nextJob.frequency,
+              nextRunAt: nextJob.nextRunAt,
+              status: nextJob.status
+            },
+            balanceHLUSD: nextJob.balanceHLUSD || null,
+            nativeBalanceHELA: nextJob.nativeBalanceHELA || null,
+            recommendedMinimumHLUSD: nextJob.recommendedMinimumHLUSD || null,
+            gasFundingStatus: nextJob.gasFundingStatus || "unknown",
+            gasHint: nextJob.gasHint,
+            fundingStatus: nextJob.fundingStatus || "unknown",
+            fundingHint: nextJob.fundingHint
+          }
+        : current
+    );
+  };
+
+  const handleJobAction = async (action: "pause" | "resume" | "run_now") => {
+    const jobId = existingJob?.id || createdJob?.job.id;
+    if (!jobId) {
+      setAutomationError("Create automation first before using job controls.");
+      return;
+    }
+
+    try {
+      setActiveJobActionId(`${jobId}:${action}`);
+      setAutomationError(null);
+      setAutomationStatus(
+        action === "run_now" ? "Running automation job..." : action === "pause" ? "Pausing automation job..." : "Resuming automation job..."
+      );
+
+      const response = await fetch(`/api/automation/jobs/${jobId}`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ action })
+      });
+
+      const payload = (await response.json()) as {
+        job?: AutomationJobView;
+        balanceHLUSD?: string | null;
+        nativeBalanceHELA?: string | null;
+        recommendedMinimumHLUSD?: string | null;
+        gasFundingStatus?: "missing" | "low" | "ready" | "unknown";
+        gasHint?: string;
+        fundingStatus?: "empty" | "low" | "funded" | "unknown";
+        fundingHint?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.job) {
+        throw new Error(payload.error || "Failed to update automation job.");
+      }
+
+      const nextJob: AutomationJobView = {
+        ...payload.job,
+        agentWalletAddress:
+          existingJob?.agentWalletAddress ||
+          createdJob?.agentWalletAddress ||
+          automationState?.storedAgent?.agentWalletAddress ||
+          null,
+        balanceHLUSD: payload.balanceHLUSD || null,
+        nativeBalanceHELA: payload.nativeBalanceHELA || null,
+        recommendedMinimumHLUSD: payload.recommendedMinimumHLUSD || null,
+        gasFundingStatus: payload.gasFundingStatus || "unknown",
+        gasHint: payload.gasHint,
+        fundingStatus: payload.fundingStatus || "unknown",
+        fundingHint: payload.fundingHint
+      };
+
+      setExistingJob(nextJob);
+      setCreatedJob((current) =>
+        current
+          ? {
+              ...current,
+              job: {
+                id: nextJob.id,
+                frequency: nextJob.frequency,
+                nextRunAt: nextJob.nextRunAt,
+                status: nextJob.status
+              },
+              balanceHLUSD: nextJob.balanceHLUSD || null,
+              nativeBalanceHELA: nextJob.nativeBalanceHELA || null,
+              recommendedMinimumHLUSD: nextJob.recommendedMinimumHLUSD || null,
+              gasFundingStatus: nextJob.gasFundingStatus || "unknown",
+              gasHint: nextJob.gasHint,
+              fundingStatus: nextJob.fundingStatus || "unknown",
+              fundingHint: nextJob.fundingHint
+            }
+          : current
+      );
+      setAutomationStatus(
+        action === "run_now"
+          ? "Automation job executed. Check the updated status below."
+          : action === "pause"
+            ? "Automation job paused."
+            : "Automation job resumed."
+      );
+    } catch (error: unknown) {
+      setAutomationError(error instanceof Error ? error.message : "Failed to update automation job.");
+      setAutomationStatus(null);
+    } finally {
+      setActiveJobActionId(null);
     }
   };
 
@@ -645,6 +1051,53 @@ export default function AgentDetailPage() {
       setAutomationStatus("Agent wallet address copied. Open the faucet and paste it there to fund the agent.");
     } catch {
       setAutomationError("Failed to copy wallet address.");
+    }
+  };
+
+  const handleFundGas = async () => {
+    const jobId = existingJob?.id || createdJob?.job.id;
+    if (!jobId) {
+      setAutomationError("Create automation first before funding gas.");
+      return;
+    }
+
+    try {
+      setIsFundingGas(true);
+      setAutomationError(null);
+      setAutomationStatus("Funding agent gas wallet...");
+
+      const response = await fetch(`/api/automation/jobs/${jobId}/fund-gas`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ amount: "0.02" })
+      });
+
+      const payload = (await response.json()) as {
+        nativeBalanceHELA?: string | null;
+        balanceHLUSD?: string | null;
+        recommendedMinimumHLUSD?: string | null;
+        gasFundingStatus?: "missing" | "low" | "ready" | "unknown";
+        gasHint?: string;
+        fundingStatus?: "empty" | "low" | "funded" | "unknown";
+        fundingHint?: string;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to fund agent gas wallet.");
+      }
+
+      await refreshExistingJob(jobId);
+      setAutomationStatus(
+        `Agent gas wallet funded${payload.nativeBalanceHELA ? ` (${payload.nativeBalanceHELA} HELA available).` : "."}`
+      );
+    } catch (error: unknown) {
+      setAutomationError(error instanceof Error ? error.message : "Failed to fund agent gas wallet.");
+      setAutomationStatus(null);
+    } finally {
+      setIsFundingGas(false);
     }
   };
 
@@ -684,6 +1137,27 @@ export default function AgentDetailPage() {
   const canCreateAutomation = Boolean(automationState?.automationReady);
   const displayWalletAddress =
     createdJob?.agentWalletAddress || automationState?.storedAgent?.agentWalletAddress || null;
+  const activeJob = existingJob || (createdJob
+    ? {
+        id: createdJob.job.id,
+        agentId: String(agentId),
+        ownerAddress: "",
+        frequency: createdJob.job.frequency,
+        nextRunAt: createdJob.job.nextRunAt,
+        status: createdJob.job.status as "active" | "paused" | "error",
+        createdAt: "",
+        updatedAt: "",
+        userConfig: formData,
+        agentWalletAddress: createdJob.agentWalletAddress,
+        balanceHLUSD: createdJob.balanceHLUSD || null,
+        nativeBalanceHELA: createdJob.nativeBalanceHELA || null,
+        recommendedMinimumHLUSD: createdJob.recommendedMinimumHLUSD || null,
+        gasFundingStatus: createdJob.gasFundingStatus || "unknown",
+        gasHint: createdJob.gasHint,
+        fundingStatus: createdJob.fundingStatus || "unknown",
+        fundingHint: createdJob.fundingHint
+      }
+    : null);
 
   return (
     <main className="min-h-screen bg-black">
@@ -788,7 +1262,7 @@ export default function AgentDetailPage() {
               </div>
             )}
 
-            {(agent.type === "CONTENT" || agent.type === "BUSINESS") && (
+            {["CONTENT", "BUSINESS", "TRADING", "FARMING", "REBALANCING", "SCHEDULING"].includes(agent.type) && (
               <Link
                 href={`/agent/${agentId}/run`}
                 className="w-full border border-white py-4 text-center font-headline text-xl uppercase text-white transition-colors hover:bg-white hover:text-black"
@@ -800,16 +1274,8 @@ export default function AgentDetailPage() {
             <div className="border border-white/12 p-4">
               <h3 className="font-headline text-xl uppercase text-white">Automation</h3>
               <p className="mt-2 font-mono text-xs uppercase text-white/60">
-                Create a recurring job for this agent. Scheduling agents need HLUSD funded into the agent wallet.
+                Create a recurring job for this agent. Scheduling agents need HLUSD funded into the agent wallet. Trading, farming, and rebalancing jobs can also be limited with execution guardrails.
               </p>
-
-              {!canCreateAutomation && (
-                <div className="mt-4 border border-yellow-500/60 bg-yellow-500/10 p-3">
-                  <p className="font-mono text-xs uppercase text-yellow-100">
-                    Automation is only available for agents deployed through the new AI runtime pipeline. Older registry-only agents can still be activated, but not automated.
-                  </p>
-                </div>
-              )}
 
               <div className="mt-4 flex flex-col gap-3">
                 <label className="font-mono text-xs uppercase text-white/60">Run Frequency</label>
@@ -824,6 +1290,81 @@ export default function AgentDetailPage() {
                   <option value="monthly">Monthly</option>
                 </select>
               </div>
+
+              {supportsExecutionPolicy(agent.type) && (
+                <div className="mt-4 border border-white/12 p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="font-mono text-xs uppercase text-white/60">Execution Guardrails</p>
+                      <p className="mt-1 font-mono text-[11px] uppercase text-white/40">
+                        Limit auto-actions to approved tokens, protocols, and spend caps.
+                      </p>
+                    </div>
+                    <label className="flex items-center gap-2 font-mono text-xs uppercase text-white/70">
+                      <input
+                        type="checkbox"
+                        checked={executionPolicy.autoExecute}
+                        onChange={(event) => handleExecutionPolicyChange("autoExecute", event.target.checked)}
+                        className="h-4 w-4 accent-white"
+                      />
+                      Auto Execute
+                    </label>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="flex flex-col gap-2">
+                      <label className="font-mono text-xs uppercase text-white/60">Max Spend / Run (HLUSD)</label>
+                      <input
+                        type="number"
+                        value={executionPolicy.maxSpendPerRunHLUSD}
+                        onChange={(event) => handleExecutionPolicyChange("maxSpendPerRunHLUSD", event.target.value)}
+                        className="border border-white/20 bg-surface-container p-3 font-mono text-sm text-white focus:border-white focus:outline-none"
+                        placeholder="e.g. 2"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <label className="font-mono text-xs uppercase text-white/60">Max Daily Spend (HLUSD)</label>
+                      <input
+                        type="number"
+                        value={executionPolicy.maxDailySpendHLUSD}
+                        onChange={(event) => handleExecutionPolicyChange("maxDailySpendHLUSD", event.target.value)}
+                        className="border border-white/20 bg-surface-container p-3 font-mono text-sm text-white focus:border-white focus:outline-none"
+                        placeholder="e.g. 5"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <label className="font-mono text-xs uppercase text-white/60">Allowed Tokens</label>
+                      <input
+                        type="text"
+                        value={executionPolicy.allowedTokens}
+                        onChange={(event) => handleExecutionPolicyChange("allowedTokens", event.target.value)}
+                        className="border border-white/20 bg-surface-container p-3 font-mono text-sm text-white focus:border-white focus:outline-none"
+                        placeholder="BTC,USDC"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <label className="font-mono text-xs uppercase text-white/60">Allowed Protocols</label>
+                      <input
+                        type="text"
+                        value={executionPolicy.allowedProtocols}
+                        onChange={(event) => handleExecutionPolicyChange("allowedProtocols", event.target.value)}
+                        className="border border-white/20 bg-surface-container p-3 font-mono text-sm text-white focus:border-white focus:outline-none"
+                        placeholder="UNISWAP-V3"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-2 md:col-span-2">
+                      <label className="font-mono text-xs uppercase text-white/60">Slippage Cap (BPS)</label>
+                      <input
+                        type="number"
+                        value={executionPolicy.slippageBps}
+                        onChange={(event) => handleExecutionPolicyChange("slippageBps", event.target.value)}
+                        className="border border-white/20 bg-surface-container p-3 font-mono text-sm text-white focus:border-white focus:outline-none"
+                        placeholder="e.g. 100"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <button
                 onClick={handleCreateAutomation}
@@ -849,6 +1390,54 @@ export default function AgentDetailPage() {
                 <div className="mt-4 border border-live-signal/30 bg-live-signal/5 p-4">
                   <p className="font-mono text-xs uppercase text-white/60">Agent Wallet Address</p>
                   <p className="mt-2 break-all font-mono text-xs text-white">{displayWalletAddress}</p>
+                  {activeJob && (
+                    <div className="mt-4 border border-white/12 p-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <p className="font-mono text-xs uppercase text-white/60">Funding Status</p>
+                        <div className="flex flex-col items-end gap-2">
+                          <span
+                            className={`font-mono text-xs uppercase ${
+                              activeJob.fundingStatus === "funded"
+                                ? "text-emerald-300"
+                                : activeJob.fundingStatus === "low"
+                                  ? "text-yellow-300"
+                                  : activeJob.fundingStatus === "empty"
+                                    ? "text-red-300"
+                                    : "text-white/50"
+                            }`}
+                          >
+                            {activeJob.fundingStatus || "unknown"}
+                          </span>
+                          <span
+                            className={`border px-3 py-1 font-mono text-[10px] uppercase ${getAutomationReadiness(activeJob).className}`}
+                          >
+                            {getAutomationReadiness(activeJob).label}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="mt-2 font-mono text-xs text-white/80">
+                        {activeJob.fundingHint || "Funding status unavailable."}
+                      </p>
+                      {activeJob.recommendedMinimumHLUSD !== null && activeJob.recommendedMinimumHLUSD !== undefined && (
+                        <p className="mt-2 font-mono text-xs text-white/50">
+                          Recommended minimum: {activeJob.recommendedMinimumHLUSD} HLUSD
+                        </p>
+                      )}
+                      <p className="mt-2 font-mono text-xs text-white/50">
+                        Current balance: {formatWalletBalance(activeJob)}
+                      </p>
+                      {activeJob.nativeBalanceHELA && (
+                        <p className="mt-2 font-mono text-xs text-white/50">
+                          Native gas balance: {activeJob.nativeBalanceHELA}
+                        </p>
+                      )}
+                      {activeJob.gasFundingStatus && (
+                        <p className="mt-2 font-mono text-xs text-white/50">
+                          Gas status: {activeJob.gasFundingStatus} {activeJob.gasHint ? `| ${activeJob.gasHint}` : ""}
+                        </p>
+                      )}
+                    </div>
+                  )}
                   <div className="mt-4 flex flex-col gap-3 md:flex-row">
                     <button
                       onClick={() => handleCopyWalletAddress(displayWalletAddress)}
@@ -861,10 +1450,56 @@ export default function AgentDetailPage() {
                       target="_blank"
                       rel="noreferrer"
                       className="border border-white bg-white px-4 py-3 text-center font-headline text-sm uppercase text-black transition-colors hover:bg-black hover:text-white"
+                      >
+                        [ OPEN HLUSD FAUCET ↗ ]
+                      </a>
+                    <button
+                      onClick={handleFundGas}
+                      disabled={isFundingGas}
+                      className="border border-white px-4 py-3 font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black disabled:opacity-50"
                     >
-                      [ OPEN HLUSD FAUCET ↗ ]
-                    </a>
+                      {isFundingGas ? "[ FUNDING GAS... ]" : "[ FUND GAS 0.02 HELA ↗ ]"}
+                    </button>
                   </div>
+                </div>
+              )}
+
+              {activeJob?.id && (
+                <div className="mt-4 flex flex-col gap-3 md:flex-row">
+                  <button
+                    onClick={() => handleJobAction("run_now")}
+                    disabled={activeJobActionId === `${activeJob.id}:run_now`}
+                    className="border border-white bg-white px-4 py-3 font-headline text-sm uppercase text-black transition-colors hover:bg-black hover:text-white disabled:opacity-50"
+                  >
+                    {activeJobActionId === `${activeJob.id}:run_now` ? "[ RUNNING... ]" : "[ RUN NOW ↗ ]"}
+                  </button>
+
+                  {activeJob.status === "paused" ? (
+                    <button
+                      onClick={() => handleJobAction("resume")}
+                      disabled={activeJobActionId === `${activeJob.id}:resume`}
+                      className="border border-white px-4 py-3 font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black disabled:opacity-50"
+                    >
+                      {activeJobActionId === `${activeJob.id}:resume` ? "[ RESUMING... ]" : "[ RESUME ↗ ]"}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleJobAction("pause")}
+                      disabled={activeJobActionId === `${activeJob.id}:pause`}
+                      className="border border-white px-4 py-3 font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black disabled:opacity-50"
+                    >
+                      {activeJobActionId === `${activeJob.id}:pause` ? "[ PAUSING... ]" : "[ PAUSE ↗ ]"}
+                    </button>
+                  )}
+
+                  {activeJob.id && (
+                    <button
+                      onClick={() => refreshExistingJob(activeJob.id)}
+                      className="border border-white px-4 py-3 font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black"
+                    >
+                      [ REFRESH STATUS ↗ ]
+                    </button>
+                  )}
                 </div>
               )}
             </div>

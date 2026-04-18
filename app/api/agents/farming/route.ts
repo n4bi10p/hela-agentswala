@@ -156,29 +156,46 @@ function projectEarnings(amount: number, apy: number, durationDays: number): num
 }
 
 function parseGeminiSections(text: string): { recommendation: string; riskAssessment: string; keyWarnings: string } {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const candidate = fenced?.[1]?.trim() || trimmed;
+
   let parsed: unknown = null;
 
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(candidate);
   } catch {
-    parsed = null;
+    const objectMatch = candidate.match(/\{[\s\S]*\}/);
+    if (objectMatch) {
+      try {
+        parsed = JSON.parse(objectMatch[0]);
+      } catch {
+        parsed = null;
+      }
+    }
   }
 
   if (isRecord(parsed)) {
     const recommendation = asString(parsed.recommendation);
     const riskAssessment = asString(parsed.riskAssessment);
-    const keyWarnings = asString(parsed.keyWarnings);
+    const keyWarnings = Array.isArray(parsed.keyWarnings)
+      ? parsed.keyWarnings
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim())
+          .filter(Boolean)
+          .join(" ")
+      : asString(parsed.keyWarnings);
 
     if (recommendation && riskAssessment) {
-      return {
-        recommendation,
-        riskAssessment,
-        keyWarnings: keyWarnings || "No material warnings identified."
-      };
+  return {
+    recommendation,
+    riskAssessment,
+    keyWarnings: keyWarnings || "No material warnings identified."
+  };
     }
   }
 
-  const lines = text
+  const lines = candidate
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
@@ -194,7 +211,50 @@ function parseGeminiSections(text: string): { recommendation: string; riskAssess
   };
 }
 
-async function buildAnalysis(config: FarmingConfig, apy: number): Promise<{ recommendation: string; riskAssessment: string; keyWarnings: string }> {
+function buildFallbackAnalysis(
+  config: FarmingConfig,
+  apy: number,
+  projectedEarnings: number
+): { recommendation: string; riskAssessment: string; keyWarnings: string } {
+  const riskAssessment =
+    config.riskLevel === "high"
+      ? `This opportunity carries elevated risk because ${config.protocol}/${config.poolType} can experience fast APY swings, liquidity changes, and smart-contract risk. Returns may look attractive at ${apy}% APY, but capital protection should be treated as the priority.`
+      : config.riskLevel === "low"
+        ? `This farming setup appears relatively conservative compared with higher-yield pools, but APY, fees, and liquidity can still move quickly. The current simulated APY is ${apy}%, so expected returns remain sensitive to market conditions and pool depth.`
+        : `This opportunity sits in a moderate-risk range: yield is meaningful at ${apy}% APY, but fees, liquidity quality, and protocol trust still matter. A medium-risk position size and regular monitoring would be more appropriate than a set-and-forget approach.`;
+
+  const keyWarnings = [
+    "APY can change quickly as liquidity and reward emissions move.",
+    "Impermanent loss and protocol risk should be considered before increasing size.",
+    `Projected earnings are estimated at ${projectedEarnings.toFixed(6)} units for the selected duration and are not guaranteed.`
+  ].join(" ");
+
+  const recommendation =
+    projectedEarnings > 0
+      ? `Consider a cautious position only if ${config.protocol}/${config.poolType} matches your risk tolerance and you are comfortable monitoring yield drift. Start smaller, verify pool quality, and scale only after validating performance over time.`
+      : `Do not proceed yet. Validate the pool inputs and expected returns before allocating capital.`;
+
+  return {
+    recommendation,
+    riskAssessment,
+    keyWarnings
+  };
+}
+
+function isUsefulAnalysis(value: { recommendation: string; riskAssessment: string; keyWarnings: string }) {
+  return (
+    value.recommendation.trim().length >= 24 &&
+    value.riskAssessment.trim().length >= 24 &&
+    value.recommendation.trim() !== "}" &&
+    value.riskAssessment.trim() !== "}"
+  );
+}
+
+async function buildAnalysis(
+  config: FarmingConfig,
+  apy: number,
+  projectedEarnings: number
+): Promise<{ recommendation: string; riskAssessment: string; keyWarnings: string }> {
   const prompt = [
     "Analyze this DeFi farming opportunity:",
     `Protocol: ${config.protocol}`,
@@ -213,8 +273,17 @@ async function buildAnalysis(config: FarmingConfig, apy: number): Promise<{ reco
     "Return valid JSON with exactly these keys: riskAssessment, keyWarnings, recommendation."
   ].join("\n");
 
-  const geminiText = await callGemini(prompt);
-  return parseGeminiSections(geminiText);
+  try {
+    const geminiText = await callGemini(prompt);
+    const parsed = parseGeminiSections(geminiText);
+    if (isUsefulAnalysis(parsed)) {
+      return parsed;
+    }
+  } catch {
+    // Fall back to deterministic analysis below.
+  }
+
+  return buildFallbackAnalysis(config, apy, projectedEarnings);
 }
 
 function toStateKey(config: FarmingConfig): string {
@@ -284,7 +353,7 @@ export async function POST(req: Request) {
     const projectedEarnings = projectEarnings(config.amount, lpData.apy, config.durationDays);
 
     console.log("[FARMING] Requesting Gemini risk assessment");
-    const ai = await buildAnalysis(config, lpData.apy);
+    const ai = await buildAnalysis(config, lpData.apy, projectedEarnings);
 
     let warning = ai.keyWarnings;
     if (isAddress(config.userAddress)) {

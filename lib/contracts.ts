@@ -1,4 +1,4 @@
-import { BrowserProvider, Contract, JsonRpcProvider, formatUnits, parseUnits } from "ethers";
+import { BrowserProvider, Contract, JsonRpcProvider, formatEther, formatUnits, parseUnits } from "ethers";
 import { ChainIntegrationError, normalizeChainError } from "./chainErrors";
 
 export type AgentType =
@@ -289,6 +289,16 @@ export async function fetchHLUSDBalanceForAddress(address: string): Promise<stri
     return formatUnits(balance, Number(decimals));
   } catch (error) {
     throw normalizeChainError(error, "Failed to fetch HLUSD balance for address");
+  }
+}
+
+export async function fetchNativeBalanceForAddress(address: string): Promise<string> {
+  try {
+    const provider = getReadProvider();
+    const balance = await provider.getBalance(address);
+    return formatEther(balance);
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to fetch native balance for address");
   }
 }
 

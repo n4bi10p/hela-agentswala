@@ -24,6 +24,8 @@ type RebalancingConfig = {
   monitorFrequency: MonitorFrequency;
 };
 
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
 type DriftEntry = {
   token: string;
   current: number;
@@ -197,7 +199,7 @@ function parseBody(body: unknown): RebalancingConfig {
   }
 
   return {
-    walletAddress: rawWalletAddress || "0x0000000000000000000000000000000000000000",
+    walletAddress: rawWalletAddress || "",
     targetAllocations,
     driftThreshold,
     tokens: parseTokenList(source.tokens, targetAllocations),
@@ -207,8 +209,12 @@ function parseBody(body: unknown): RebalancingConfig {
   };
 }
 
+function hasLiveWalletAddress(walletAddress: string): boolean {
+  return isAddress(walletAddress) && walletAddress.toLowerCase() !== ZERO_ADDRESS;
+}
+
 async function resolveCurrentAllocations(config: RebalancingConfig): Promise<AllocationMap> {
-  if (isAddress(config.walletAddress) && config.tokens.length > 0) {
+  if (hasLiveWalletAddress(config.walletAddress) && config.tokens.length > 0) {
     const calculated = await calculatePortfolioAllocations(config.walletAddress, config.tokens);
     const normalized: AllocationMap = {};
     for (const token of config.tokens) {
@@ -288,7 +294,8 @@ async function buildRecommendation(
 }
 
 function stateKey(config: RebalancingConfig): string {
-  return `${config.walletAddress.toLowerCase()}:${Object.keys(config.targetAllocations).sort().join("-")}`;
+  const walletPart = config.walletAddress ? config.walletAddress.toLowerCase() : "manual";
+  return `${walletPart}:${Object.keys(config.targetAllocations).sort().join("-")}`;
 }
 
 function updateState(config: RebalancingConfig, needsRebalance: boolean): void {
@@ -302,7 +309,7 @@ function updateState(config: RebalancingConfig, needsRebalance: boolean): void {
 }
 
 function startMonitor(config: RebalancingConfig): string | null {
-  if (!config.enableMonitoring || !isAddress(config.walletAddress) || config.tokens.length === 0) {
+  if (!config.enableMonitoring || !hasLiveWalletAddress(config.walletAddress) || config.tokens.length === 0) {
     return null;
   }
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getStoredAgent, listExecutionLogsForOwner, listJobsForOwner } from "@/lib/automationStore";
+import { getFundingSnapshot } from "@/lib/automationFunding";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -9,14 +10,20 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "ownerAddress is required" }, { status: 400 });
   }
 
-  const jobs = listJobsForOwner(ownerAddress).map((job) => {
-    const storedAgent = getStoredAgent(job.agentId);
-    return {
-      ...job,
-      agentWalletAddress: storedAgent?.agentWalletAddress || null,
-      agentStatus: storedAgent?.status || null
-    };
-  });
+  const jobs = await Promise.all(
+    listJobsForOwner(ownerAddress).map(async (job) => {
+      const storedAgent = getStoredAgent(job.agentId);
+      const agentWalletAddress = storedAgent?.agentWalletAddress || null;
+      const funding = await getFundingSnapshot(agentWalletAddress, job, storedAgent?.agent.agentType || null);
+
+      return {
+        ...job,
+        agentWalletAddress,
+        agentStatus: storedAgent?.status || null,
+        ...funding
+      };
+    })
+  );
 
   const logs = listExecutionLogsForOwner(ownerAddress);
 

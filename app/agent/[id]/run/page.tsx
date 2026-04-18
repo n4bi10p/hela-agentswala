@@ -5,7 +5,14 @@ import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
 import { useParams } from "next/navigation";
 
-type BackendAgentType = "content" | "business" | "generic";
+type BackendAgentType =
+  | "content"
+  | "business"
+  | "trading"
+  | "farming"
+  | "rebalancing"
+  | "scheduling"
+  | "generic";
 
 type StoredAgentConfig = Record<string, string>;
 type ConfigJson = Record<string, unknown>;
@@ -29,6 +36,41 @@ type ExecuteRouteResponse = {
   error?: string;
 };
 
+type TradingRouteResponse = {
+  triggered?: boolean;
+  currentPrice?: number;
+  thresholdPrice?: number;
+  direction?: string;
+  priceDiff?: number;
+  analysis?: string;
+  checkedAt?: string;
+  error?: string;
+};
+
+type FarmingRouteResponse = {
+  recommendation?: string;
+  projectedEarnings?: number;
+  riskAssessment?: string;
+  warning?: string;
+  error?: string;
+};
+
+type RebalancingRouteResponse = {
+  needsRebalance?: boolean;
+  requiredTrades?: string[];
+  recommendation?: string;
+  checkedAt?: string;
+  error?: string;
+};
+
+type SchedulingRouteResponse = {
+  jobId?: string;
+  nextRun?: string | null;
+  status?: string;
+  message?: string;
+  error?: string;
+};
+
 type AgentRouteResponse = {
   agent?: {
     id: number;
@@ -45,21 +87,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-const AGENT_DETAILS: Record<string, AgentDetails> = {
-  "3": {
-    name: "Social Sentinel",
-    type: "CONTENT",
-    backendType: "content",
-    placeholder: "Paste the message you received...",
-  },
-  "7": {
-    name: "Business Assistant",
-    type: "BUSINESS",
-    backendType: "business",
-    placeholder: "Ask your question or describe the task...",
-  },
-};
-
 function resolveBackendType(agentType: string): BackendAgentType {
   const normalized = agentType.trim().toLowerCase();
   if (normalized === "content") {
@@ -67,6 +94,18 @@ function resolveBackendType(agentType: string): BackendAgentType {
   }
   if (normalized === "business") {
     return "business";
+  }
+  if (normalized === "trading") {
+    return "trading";
+  }
+  if (normalized === "farming") {
+    return "farming";
+  }
+  if (normalized === "rebalancing") {
+    return "rebalancing";
+  }
+  if (normalized === "scheduling") {
+    return "scheduling";
   }
   return "generic";
 }
@@ -77,6 +116,18 @@ function defaultPlaceholder(backendType: BackendAgentType, agentTypeLabel: strin
   }
   if (backendType === "business") {
     return "Ask your question or describe the task...";
+  }
+  if (backendType === "trading") {
+    return "Add an execution note or strategy question for this trading setup...";
+  }
+  if (backendType === "farming") {
+    return "Add an execution note or ask for a farming assessment...";
+  }
+  if (backendType === "rebalancing") {
+    return "Add a note or ask for a rebalance recommendation...";
+  }
+  if (backendType === "scheduling") {
+    return "Add a note for this scheduled payment run...";
   }
   return `Provide ${agentTypeLabel.toLowerCase()} input and press send...`;
 }
@@ -103,6 +154,24 @@ function normalizeTone(value: string): "professional" | "casual" | "aggressive" 
 
 function normalizeFormality(value: string): "formal" | "informal" {
   return value.trim().toLowerCase() === "informal" ? "informal" : "formal";
+}
+
+function normalizeDirection(value: string): "above" | "below" {
+  return value.trim().toLowerCase() === "below" ? "below" : "above";
+}
+
+function normalizeMonitorFrequency(value: string): "minutely" | "hourly" | "daily" | "weekly" | "monthly" {
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "minutely" ||
+    normalized === "hourly" ||
+    normalized === "daily" ||
+    normalized === "weekly" ||
+    normalized === "monthly"
+  ) {
+    return normalized;
+  }
+  return "daily";
 }
 
 function tryParseJson(value: string): unknown | null {
@@ -335,12 +404,115 @@ async function callGenericAgent(
   return data.result;
 }
 
+function readNumber(config: StoredAgentConfig, field: string, fallback: number): number {
+  const raw = (config[field] || "").trim();
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function readText(config: StoredAgentConfig, field: string, fallback = ""): string {
+  const value = (config[field] || "").trim();
+  return value || fallback;
+}
+
+async function callTradingAgent(message: string, config: StoredAgentConfig): Promise<string> {
+  const tokenPair = readText(config, "Token Pair", "btc/usdc");
+  const thresholdPrice = readNumber(config, "Price Threshold", 60000);
+  const currentPrice = readNumber(config, "Current Price", thresholdPrice);
+  const amount = readNumber(config, "Amount", 1);
+  const direction = normalizeDirection(readText(config, "Action Type", "above"));
+
+  const payload = {
+    tokenPair,
+    thresholdPrice,
+    currentPrice,
+    direction,
+    action: "alert",
+    amount,
+    frontendNote: message
+  };
+
+  const data = await postJson<TradingRouteResponse>("/api/agents/trading", payload);
+  return [
+    data.analysis || "Trading agent returned no analysis.",
+    "",
+    `Current price: ${data.currentPrice ?? "n/a"}`,
+    `Threshold: ${data.thresholdPrice ?? "n/a"}`,
+    `Direction: ${data.direction || direction}`,
+    `Triggered: ${data.triggered ? "yes" : "no"}`
+  ].join("\n");
+}
+
+async function callFarmingAgent(message: string, config: StoredAgentConfig): Promise<string> {
+  const payload = {
+    protocol: readText(config, "LP Token Address", "demo-farm"),
+    poolType: readText(config, "LP Token Address", "hlusd-usdc"),
+    amount: readNumber(config, "Threshold", 100),
+    durationDays: 30,
+    riskLevel: "medium",
+    frontendNote: message
+  };
+
+  const data = await postJson<FarmingRouteResponse>("/api/agents/farming", payload);
+  return [
+    data.recommendation || "Farming agent returned no recommendation.",
+    "",
+    data.riskAssessment ? `Risk: ${data.riskAssessment}` : null,
+    typeof data.projectedEarnings === "number" ? `Projected earnings: ${data.projectedEarnings}` : null,
+    data.warning ? `Warning: ${data.warning}` : null
+  ]
+    .filter((item): item is string => Boolean(item))
+    .join("\n");
+}
+
+async function callRebalancingAgent(message: string, config: StoredAgentConfig): Promise<string> {
+  const targetAllocations = parseConfigValue(readText(config, "Target Allocation", "USDC:60,WETH:40"));
+  const currentAllocations = parseConfigValue(readText(config, "Current Allocation", "USDC:55,WETH:45"));
+  const driftTolerance = readNumber(config, "Drift Tolerance %", 5);
+
+  const payload = {
+    targetAllocations: isRecord(targetAllocations) ? targetAllocations : { USDC: 60, WETH: 40 },
+    currentAllocations: isRecord(currentAllocations) ? currentAllocations : { USDC: 55, WETH: 45 },
+    driftTolerance,
+    frontendNote: message
+  };
+
+  const data = await postJson<RebalancingRouteResponse>("/api/agents/rebalancing", payload);
+  return [
+    data.recommendation || "Rebalancing agent returned no recommendation.",
+    "",
+    `Needs rebalance: ${data.needsRebalance ? "yes" : "no"}`,
+    data.requiredTrades && data.requiredTrades.length
+      ? `Required trades: ${data.requiredTrades.join(" | ")}`
+      : "Required trades: none"
+  ].join("\n");
+}
+
+async function callSchedulingAgent(message: string, config: StoredAgentConfig): Promise<string> {
+  const payload = {
+    recipient: readText(config, "Recipient Address", "0x4E81d5892034B31f9d36F903605940f697446B6b"),
+    amount: readNumber(config, "Amount (HLUSD)", 1),
+    token: "HLUSD",
+    frequency: normalizeMonitorFrequency(readText(config, "Frequency", "daily")),
+    note: message
+  };
+
+  const data = await postJson<SchedulingRouteResponse>("/api/agents/scheduling", payload);
+  return [
+    data.message || "Scheduling agent returned no message.",
+    data.status ? `Status: ${data.status}` : null,
+    data.nextRun ? `Next run: ${new Date(data.nextRun).toLocaleString()}` : null,
+    data.jobId ? `Job id: ${data.jobId}` : null
+  ]
+    .filter((item): item is string => Boolean(item))
+    .join("\n");
+}
+
 export default function AgentRunPage() {
   const params = useParams();
   const agentId = params.id as string;
-  const presetAgent = AGENT_DETAILS[agentId];
 
-  const [agent, setAgent] = useState<AgentDetails | null>(presetAgent || null);
+  const [agent, setAgent] = useState<AgentDetails | null>(null);
   const [isAgentLoading, setIsAgentLoading] = useState(true);
   const [agentLoadError, setAgentLoadError] = useState<string | null>(null);
 
@@ -364,9 +536,6 @@ export default function AgentRunPage() {
     async function loadAgent() {
       setIsAgentLoading(true);
       setAgentLoadError(null);
-      if (presetAgent) {
-        setAgent(presetAgent);
-      }
 
       try {
         const response = await fetch(`/api/agents/${agentId}`, {
@@ -392,9 +561,7 @@ export default function AgentRunPage() {
         }
       } catch (error: unknown) {
         if (active) {
-          if (!presetAgent) {
-            setAgent(null);
-          }
+          setAgent(null);
           setAgentLoadError(error instanceof Error ? error.message : "Failed to load agent details.");
         }
       } finally {
@@ -408,7 +575,7 @@ export default function AgentRunPage() {
     return () => {
       active = false;
     };
-  }, [agentId, presetAgent]);
+  }, [agentId]);
 
   if (!agent && isAgentLoading) {
     return (
@@ -484,6 +651,46 @@ export default function AgentRunPage() {
         setMessages((prev) => [...prev, assistantMessage]);
       } else if (agent.backendType === "business") {
         const response = await callBusinessAgent(prompt, storedConfig);
+        const assistantMessage: Message = {
+          id: createMessageId(),
+          type: "assistant",
+          content: response,
+          timestamp: new Date(),
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+      } else if (agent.backendType === "trading") {
+        const response = await callTradingAgent(prompt, storedConfig);
+        const assistantMessage: Message = {
+          id: createMessageId(),
+          type: "assistant",
+          content: response,
+          timestamp: new Date(),
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+      } else if (agent.backendType === "farming") {
+        const response = await callFarmingAgent(prompt, storedConfig);
+        const assistantMessage: Message = {
+          id: createMessageId(),
+          type: "assistant",
+          content: response,
+          timestamp: new Date(),
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+      } else if (agent.backendType === "rebalancing") {
+        const response = await callRebalancingAgent(prompt, storedConfig);
+        const assistantMessage: Message = {
+          id: createMessageId(),
+          type: "assistant",
+          content: response,
+          timestamp: new Date(),
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+      } else if (agent.backendType === "scheduling") {
+        const response = await callSchedulingAgent(prompt, storedConfig);
         const assistantMessage: Message = {
           id: createMessageId(),
           type: "assistant",

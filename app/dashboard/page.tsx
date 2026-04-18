@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { TopNavBar } from "@/components/TopNavBar";
 import Link from "next/link";
-import { fetchHLUSDBalanceForAddress } from "@/lib/contracts";
 import { connectWallet, ensureHeLaNetwork, getConnectedAccount } from "@/lib/wallet";
 
 type DashboardAgent = {
@@ -49,6 +48,15 @@ type AutomationJobView = {
   lastError?: string;
   lastExecutionTxHash?: string;
   agentWalletAddress: string | null;
+  balanceHLUSD?: string | null;
+  balanceValue?: number | null;
+  nativeBalanceHELA?: string | null;
+  nativeBalanceValue?: number | null;
+  recommendedMinimumHLUSD?: string | null;
+  gasFundingStatus?: "missing" | "low" | "ready" | "unknown";
+  gasHint?: string;
+  fundingStatus?: "empty" | "low" | "funded" | "unknown";
+  fundingHint?: string;
 };
 
 type AutomationLogView = {
@@ -121,15 +129,55 @@ function safeConfigPreview(config: Record<string, unknown>) {
     .join(" | ");
 }
 
+function getAutomationReadiness(job: AutomationJobView): {
+  label: string;
+  className: string;
+} {
+  if (job.fundingStatus === "funded" && job.gasFundingStatus === "ready") {
+    return {
+      label: "READY TO RUN",
+      className: "text-emerald-300 border-emerald-300/50 bg-emerald-300/10"
+    };
+  }
+
+  if (job.gasFundingStatus === "missing" || job.gasFundingStatus === "low") {
+    return {
+      label: "NEEDS GAS",
+      className: "text-yellow-300 border-yellow-300/50 bg-yellow-300/10"
+    };
+  }
+
+  if (job.fundingStatus === "empty" || job.fundingStatus === "low") {
+    return {
+      label: "NEEDS HLUSD",
+      className: "text-red-300 border-red-300/50 bg-red-300/10"
+    };
+  }
+
+  return {
+    label: "CHECK FUNDING",
+    className: "text-white/70 border-white/20 bg-white/5"
+  };
+}
+
+function formatWalletBalance(job: AutomationJobView): string {
+  if (job.recommendedMinimumHLUSD === "0") {
+    return "N/A (not required)";
+  }
+
+  return `${job.balanceHLUSD || "0"} HLUSD`;
+}
+
 export default function DashboardPage() {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [activeAgents, setActiveAgents] = useState<DashboardAgent[]>([]);
   const [activityLog, setActivityLog] = useState<ActivityItem[]>([]);
   const [automationJobs, setAutomationJobs] = useState<AutomationJobView[]>([]);
   const [automationLogs, setAutomationLogs] = useState<AutomationLogView[]>([]);
-  const [walletBalances, setWalletBalances] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [activeJobActionId, setActiveJobActionId] = useState<string | null>(null);
+  const [activeGasFundingJobId, setActiveGasFundingJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const runningAgentsCount = useMemo(
@@ -172,6 +220,62 @@ export default function DashboardPage() {
     }
   };
 
+  const handleJobAction = async (jobId: string, action: "pause" | "resume" | "run_now") => {
+    try {
+      setActiveJobActionId(`${jobId}:${action}`);
+      setError(null);
+
+      const response = await fetch(`/api/automation/jobs/${jobId}`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ action })
+      });
+
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to update automation job.");
+      }
+
+      if (walletAddress) {
+        await loadDashboardForAddress(walletAddress);
+      }
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Failed to update automation job.");
+    } finally {
+      setActiveJobActionId(null);
+    }
+  };
+
+  const handleFundGas = async (jobId: string) => {
+    try {
+      setActiveGasFundingJobId(jobId);
+      setError(null);
+
+      const response = await fetch(`/api/automation/jobs/${jobId}/fund-gas`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ amount: "0.02" })
+      });
+
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to fund agent gas wallet.");
+      }
+
+      if (walletAddress) {
+        await loadDashboardForAddress(walletAddress);
+      }
+    } catch (fundingError) {
+      setError(fundingError instanceof Error ? fundingError.message : "Failed to fund agent gas wallet.");
+    } finally {
+      setActiveGasFundingJobId(null);
+    }
+  };
+
   const loadDashboardForAddress = useCallback(async (address: string) => {
     const [dashboardResponse, automationResponse] = await Promise.all([
       fetch(`/api/agents/user/${address}`, {
@@ -205,22 +309,11 @@ export default function DashboardPage() {
       }
     }
 
-    const uniqueWallets = Array.from(
-      new Set(nextJobs.map((job) => job.agentWalletAddress).filter((wallet): wallet is string => Boolean(wallet)))
-    );
-
-    const balances = Object.fromEntries(
-      await Promise.all(
-        uniqueWallets.map(async (wallet) => [wallet, await fetchHLUSDBalanceForAddress(wallet).catch(() => "0")] as const)
-      )
-    );
-
     setWalletAddress(dashboardData.walletAddress || address);
     setActiveAgents(Array.isArray(dashboardData.activeAgents) ? dashboardData.activeAgents : []);
     setActivityLog(Array.isArray(dashboardData.activity) ? dashboardData.activity : []);
     setAutomationJobs(nextJobs);
     setAutomationLogs(nextLogs);
-    setWalletBalances(balances);
   }, []);
 
   const bootstrapDashboard = useCallback(async () => {
@@ -235,7 +328,6 @@ export default function DashboardPage() {
         setActivityLog([]);
         setAutomationJobs([]);
         setAutomationLogs([]);
-        setWalletBalances({});
         setError("Connect your MetaMask wallet to load your dashboard.");
         return;
       }
@@ -351,21 +443,35 @@ export default function DashboardPage() {
               {automationJobs.map((job) => (
                 <div key={job.id} className="border border-white/12 p-6 transition-colors hover:border-white">
                   <div className="mb-4 flex items-start justify-between gap-4">
+                    {(() => {
+                      const readiness = getAutomationReadiness(job);
+                      return (
+                        <>
                     <div>
                       <h3 className="font-headline text-2xl uppercase text-white">Agent {job.agentId}</h3>
                       <p className="font-mono text-xs uppercase text-white/60">Frequency: {job.frequency}</p>
                     </div>
-                    <div
-                      className={`font-mono text-xs uppercase ${
-                        job.status === "active"
-                          ? "text-live-signal"
-                          : job.status === "error"
-                            ? "text-red-400"
-                            : "text-white/50"
-                      }`}
-                    >
-                      {job.status}
+                    <div className="flex flex-col items-end gap-2">
+                      <div
+                        className={`font-mono text-xs uppercase ${
+                          job.status === "active"
+                            ? "text-emerald-300"
+                            : job.status === "error"
+                              ? "text-red-400"
+                              : "text-white/50"
+                        }`}
+                      >
+                        {job.status}
+                      </div>
+                      <span
+                        className={`border px-3 py-1 font-mono text-[10px] uppercase ${readiness.className}`}
+                      >
+                        {readiness.label}
+                      </span>
                     </div>
+                        </>
+                      );
+                    })()}
                   </div>
 
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -376,7 +482,7 @@ export default function DashboardPage() {
                     <div>
                       <p className="font-mono text-xs uppercase text-white/60">Wallet Balance</p>
                       <p className="mt-1 font-mono text-sm text-white">
-                        {job.agentWalletAddress ? `${walletBalances[job.agentWalletAddress] || "0"} HLUSD` : "0 HLUSD"}
+                        {formatWalletBalance(job)}
                       </p>
                     </div>
                     <div>
@@ -404,6 +510,41 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
+                  <div className="mt-4 border border-white/12 p-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <p className="font-mono text-xs uppercase text-white/60">Funding Status</p>
+                      <span
+                        className={`font-mono text-xs uppercase ${
+                          job.fundingStatus === "funded"
+                            ? "text-emerald-300"
+                            : job.fundingStatus === "low"
+                              ? "text-yellow-300"
+                              : job.fundingStatus === "empty"
+                                ? "text-red-300"
+                                : "text-white/50"
+                        }`}
+                      >
+                        {job.fundingStatus || "unknown"}
+                      </span>
+                    </div>
+                    <p className="mt-2 font-mono text-xs text-white/80">{job.fundingHint || "Funding status unavailable."}</p>
+                    {job.recommendedMinimumHLUSD && (
+                      <p className="mt-2 font-mono text-xs text-white/50">
+                        Recommended minimum: {job.recommendedMinimumHLUSD} HLUSD
+                      </p>
+                    )}
+                    {job.nativeBalanceHELA && (
+                      <p className="mt-2 font-mono text-xs text-white/50">
+                        Native gas balance: {job.nativeBalanceHELA}
+                      </p>
+                    )}
+                    {job.gasFundingStatus && (
+                      <p className="mt-2 font-mono text-xs text-white/50">
+                        Gas status: {job.gasFundingStatus} {job.gasHint ? `| ${job.gasHint}` : ""}
+                      </p>
+                    )}
+                  </div>
+
                   {job.agentWalletAddress && (
                     <div className="mt-4 flex flex-col gap-3 md:flex-row">
                       <button
@@ -417,11 +558,46 @@ export default function DashboardPage() {
                         target="_blank"
                         rel="noreferrer"
                         className="border border-white bg-white px-4 py-3 text-center font-headline text-sm uppercase text-black transition-colors hover:bg-black hover:text-white"
+                        >
+                          [ OPEN HLUSD FAUCET ↗ ]
+                        </a>
+                      <button
+                        onClick={() => handleFundGas(job.id)}
+                        disabled={activeGasFundingJobId === job.id}
+                        className="border border-white px-4 py-3 font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black disabled:opacity-50"
                       >
-                        [ OPEN HLUSD FAUCET ↗ ]
-                      </a>
+                        {activeGasFundingJobId === job.id ? "[ FUNDING GAS... ]" : "[ FUND GAS 0.02 HELA ↗ ]"}
+                      </button>
                     </div>
                   )}
+
+                  <div className="mt-4 flex flex-col gap-3 md:flex-row">
+                    <button
+                      onClick={() => handleJobAction(job.id, "run_now")}
+                      disabled={activeJobActionId === `${job.id}:run_now`}
+                      className="border border-white bg-white px-4 py-3 font-headline text-sm uppercase text-black transition-colors hover:bg-black hover:text-white disabled:opacity-50"
+                    >
+                      {activeJobActionId === `${job.id}:run_now` ? "[ RUNNING... ]" : "[ RUN NOW ↗ ]"}
+                    </button>
+
+                    {job.status === "paused" ? (
+                      <button
+                        onClick={() => handleJobAction(job.id, "resume")}
+                        disabled={activeJobActionId === `${job.id}:resume`}
+                        className="border border-white px-4 py-3 font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black disabled:opacity-50"
+                      >
+                        {activeJobActionId === `${job.id}:resume` ? "[ RESUMING... ]" : "[ RESUME ↗ ]"}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleJobAction(job.id, "pause")}
+                        disabled={activeJobActionId === `${job.id}:pause`}
+                        className="border border-white px-4 py-3 font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black disabled:opacity-50"
+                      >
+                        {activeJobActionId === `${job.id}:pause` ? "[ PAUSING... ]" : "[ PAUSE ↗ ]"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
