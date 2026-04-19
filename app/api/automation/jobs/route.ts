@@ -117,8 +117,8 @@ export async function GET(req: Request) {
   const ownerAddress = searchParams.get("ownerAddress");
 
   const jobs = await Promise.all(
-    (ownerAddress ? listJobsForOwner(ownerAddress) : listAgentJobs()).map(async (job) => {
-      const storedAgent = getStoredAgent(job.agentId);
+    (await (ownerAddress ? listJobsForOwner(ownerAddress) : listAgentJobs())).map(async (job) => {
+      const storedAgent = await getStoredAgent(job.agentId);
       const agentWalletAddress = storedAgent?.agentWalletAddress || null;
       const funding = await getFundingSnapshot(agentWalletAddress, job, storedAgent?.agent.agentType || null);
 
@@ -135,13 +135,13 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const body = validateCreateBody(await req.json());
-    const storedAgent = (await ensureStoredAgentForAutomation(body.agentId!)) || getStoredAgent(body.agentId!);
+    const storedAgent = (await ensureStoredAgentForAutomation(body.agentId!)) || (await getStoredAgent(body.agentId!));
 
     if (!storedAgent) {
       return NextResponse.json({ error: "Stored agent not found for agentId" }, { status: 404 });
     }
 
-    const job = createAgentJob({
+    const job = await createAgentJob({
       agentId: body.agentId!,
       ownerAddress: body.ownerAddress!,
       frequency: body.frequency!,

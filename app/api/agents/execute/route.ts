@@ -82,7 +82,7 @@ export async function POST(req: Request) {
 
   try {
     console.log("[EXECUTE] Step 1: checking agent availability");
-    const storedAgent = getAgent(agentId);
+    const storedAgent = await getAgent(agentId);
     if (!storedAgent) {
       return NextResponse.json({ error: "Agent not found" }, { status: 404 });
     }

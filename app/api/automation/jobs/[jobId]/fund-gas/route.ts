@@ -40,12 +40,12 @@ function requireEnv(name: string) {
 }
 
 export async function POST(req: Request, context: RouteContext) {
-  const job = getAgentJob(context.params.jobId);
+  const job = await getAgentJob(context.params.jobId);
   if (!job) {
     return NextResponse.json({ error: "Automation job not found" }, { status: 404 });
   }
 
-  const storedAgent = getStoredAgent(job.agentId);
+  const storedAgent = await getStoredAgent(job.agentId);
   if (!storedAgent) {
     return NextResponse.json({ error: "Stored agent not found" }, { status: 404 });
   }
@@ -73,7 +73,7 @@ export async function POST(req: Request, context: RouteContext) {
         agentWalletAddress: storedAgent.agentWalletAddress,
         fundedAmount: amount,
         txHash: receipt?.hash || tx.hash,
-        nativeBalanceHELA: formatEther(nativeBalance),
+        nativeBalanceAfterFundingHELA: formatEther(nativeBalance),
         ...funding
       },
       { status: 200 }

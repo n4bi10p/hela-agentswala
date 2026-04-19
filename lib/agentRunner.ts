@@ -30,14 +30,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * @param executionCode Executable function source returned by generation pipeline.
  * @param developerAddress Wallet address of the developer who deployed the agent.
  */
-export function storeAgent(
+export async function storeAgent(
   agentId: string,
   agent: AgentObject,
   executionCode: string,
   developerAddress: string,
   agentWalletAddress: string,
   agentWalletPrivateKey: string
-): void {
+): Promise<void> {
   const record: StoredAgent = {
     agent,
     executionCode,
@@ -50,7 +50,7 @@ export function storeAgent(
   };
 
   agentStore.set(agentId, record);
-  upsertStoredAgent(record);
+  await upsertStoredAgent(record);
 }
 
 /**
@@ -58,17 +58,17 @@ export function storeAgent(
  * @param agentId Unique agent identifier.
  * @returns Stored agent payload if found, otherwise undefined.
  */
-export function getAgent(agentId: string): StoredAgent | undefined {
+export async function getAgent(agentId: string): Promise<StoredAgent | undefined> {
   const inMemory = agentStore.get(agentId);
   if (inMemory) {
     return inMemory;
   }
 
-  const stored = getStoredAgent(agentId);
+  const stored = await getStoredAgent(agentId);
   if (stored) {
     agentStore.set(agentId, stored);
   }
-  return stored;
+  return stored ?? undefined;
 }
 
 /**
@@ -85,7 +85,7 @@ export async function runAgent(
   config: Record<string, any>
 ): Promise<ExecutionResult> {
   try {
-    const stored = getAgent(agentId);
+    const stored = await getAgent(agentId);
     if (!stored) {
       throw new Error("Agent not found");
     }

@@ -15,13 +15,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export async function GET(_req: Request, context: RouteContext) {
-  const job = getAgentJob(context.params.jobId);
+  const job = await getAgentJob(context.params.jobId);
 
   if (!job) {
     return NextResponse.json({ error: "Automation job not found" }, { status: 404 });
   }
 
-  const storedAgent = getStoredAgent(job.agentId);
+  const storedAgent = await getStoredAgent(job.agentId);
   const funding = await getFundingSnapshot(
     storedAgent?.agentWalletAddress || null,
     job,
@@ -33,7 +33,7 @@ export async function GET(_req: Request, context: RouteContext) {
 
 export async function PATCH(req: Request, context: RouteContext) {
   const jobId = context.params.jobId;
-  const job = getAgentJob(jobId);
+  const job = await getAgentJob(jobId);
 
   if (!job) {
     return NextResponse.json({ error: "Automation job not found" }, { status: 404 });
@@ -48,12 +48,12 @@ export async function PATCH(req: Request, context: RouteContext) {
     const action = body.action.trim().toLowerCase();
 
     if (action === "pause") {
-      const updated = updateAgentJob(jobId, (current) => ({
+      const updated = await updateAgentJob(jobId, (current) => ({
         ...current,
         status: "paused",
         lastError: undefined
       }));
-      const storedAgent = updated ? getStoredAgent(updated.agentId) : null;
+      const storedAgent = updated ? await getStoredAgent(updated.agentId) : null;
       const funding = updated
         ? await getFundingSnapshot(storedAgent?.agentWalletAddress || null, updated, storedAgent?.agent.agentType || null)
         : null;
@@ -61,13 +61,13 @@ export async function PATCH(req: Request, context: RouteContext) {
     }
 
     if (action === "resume") {
-      const updated = updateAgentJob(jobId, (current) => ({
+      const updated = await updateAgentJob(jobId, (current) => ({
         ...current,
         status: "active",
         nextRunAt: new Date().toISOString(),
         lastError: undefined
       }));
-      const storedAgent = updated ? getStoredAgent(updated.agentId) : null;
+      const storedAgent = updated ? await getStoredAgent(updated.agentId) : null;
       const funding = updated
         ? await getFundingSnapshot(storedAgent?.agentWalletAddress || null, updated, storedAgent?.agent.agentType || null)
         : null;
@@ -76,8 +76,8 @@ export async function PATCH(req: Request, context: RouteContext) {
 
     if (action === "run_now") {
       const result = await processJobById(jobId);
-      const updated = getAgentJob(jobId);
-      const storedAgent = updated ? getStoredAgent(updated.agentId) : null;
+      const updated = await getAgentJob(jobId);
+      const storedAgent = updated ? await getStoredAgent(updated.agentId) : null;
       const funding = updated
         ? await getFundingSnapshot(storedAgent?.agentWalletAddress || null, updated, storedAgent?.agent.agentType || null)
         : null;

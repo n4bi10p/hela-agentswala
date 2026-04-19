@@ -201,7 +201,7 @@ export async function POST(req: Request) {
     }
 
     console.log("[DEPLOY] Step 4: storing deployed agent in memory store");
-    storeAgent(
+    await storeAgent(
       agentId,
       agent,
       executionCode,

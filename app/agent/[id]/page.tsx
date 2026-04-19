@@ -212,7 +212,7 @@ type CreatedJobResponse = {
     id: string;
     frequency: AutomationFrequency;
     nextRunAt: string;
-    status: string;
+    status: "active" | "paused" | "error";
   };
   agentWalletAddress: string;
   balanceHLUSD?: string | null;
@@ -789,16 +789,17 @@ export default function AgentDetailPage() {
           setAgentFromBackend(toAgentProfile(agentData.agent));
           setAutomationState(nextAutomationState);
           setExistingJob(nextExistingJob);
-          if (nextAutomationState?.storedAgent) {
+          const storedAgent = nextAutomationState?.storedAgent;
+          if (storedAgent) {
             setCreatedJob((current) =>
               current || {
                 job: {
                   id: nextExistingJob?.id || "",
                   frequency: nextExistingJob?.frequency || "daily",
                   nextRunAt: nextExistingJob?.nextRunAt || "",
-                  status: nextExistingJob?.status || nextAutomationState.storedAgent?.status || "active"
+                  status: nextExistingJob?.status || storedAgent.status || "active"
                 },
-                agentWalletAddress: nextAutomationState.storedAgent.agentWalletAddress,
+                agentWalletAddress: storedAgent.agentWalletAddress,
                 balanceHLUSD: nextExistingJob?.balanceHLUSD || null,
                 nativeBalanceHELA: nextExistingJob?.nativeBalanceHELA || null,
                 recommendedMinimumHLUSD: nextExistingJob?.recommendedMinimumHLUSD || null,
@@ -937,10 +938,10 @@ export default function AgentDetailPage() {
       }
 
       setCreatedJob(payload);
-      setExistingJob({
-        ...payload.job,
-        agentId: String(agentId),
-        ownerAddress: account,
+        setExistingJob({
+          ...payload.job,
+          agentId: String(agentId),
+          ownerAddress: account,
         userConfig: formData,
         agentWalletAddress: payload.agentWalletAddress,
         balanceHLUSD: payload.balanceHLUSD || null,

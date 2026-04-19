@@ -87,7 +87,7 @@ function enforceAllowedProtocols(job: AgentJob, protocols: string[]) {
   }
 }
 
-function enforceSpendLimits(job: AgentJob, estimatedSpendHLUSD: number) {
+async function enforceSpendLimits(job: AgentJob, estimatedSpendHLUSD: number) {
   const policy = getExecutionPolicy(job);
 
   if (policy.autoExecute === false) {
@@ -105,7 +105,7 @@ function enforceSpendLimits(job: AgentJob, estimatedSpendHLUSD: number) {
 
   if (typeof policy.maxDailySpendHLUSD === "number") {
     const today = new Date().toISOString().slice(0, 10);
-    const spentToday = listExecutionLogsForOwner(job.ownerAddress)
+    const spentToday = (await listExecutionLogsForOwner(job.ownerAddress))
       .filter((log) => log.jobId === job.id && log.success && log.executedAt.startsWith(today))
       .reduce((total, log) => {
         const match = log.result.match(/Estimated spend: ([0-9]+(?:\.[0-9]+)?)/i);
@@ -137,7 +137,7 @@ async function logExecutionOnChain(job: AgentJob, result: ExecutionResult) {
 }
 
 async function executeSchedulingTransfer(job: AgentJob) {
-  const storedAgent = getStoredAgent(job.agentId);
+  const storedAgent = await getStoredAgent(job.agentId);
   if (!storedAgent) {
     throw new Error("Stored agent not found");
   }
@@ -236,10 +236,7 @@ function parseMap(value: unknown, fallback: Record<string, number>): Record<stri
 }
 
 function getRebalancingExecutionBudget(job: AgentJob, mostOverweightDeviation: number, mostUnderweightDeviation: number): number {
-  const configuredCap =
-    typeof getExecutionPolicy(job).maxSpendPerRunHLUSD === "number"
-      ? getExecutionPolicy(job).maxSpendPerRunHLUSD
-      : 1;
+  const configuredCap = getExecutionPolicy(job).maxSpendPerRunHLUSD ?? 1;
 
   return Number(
     Math.max(0.1, Math.min(configuredCap, Math.abs(mostOverweightDeviation), Math.abs(mostUnderweightDeviation))).toFixed(4)
@@ -335,13 +332,13 @@ async function executeTradingAutomation(job: AgentJob): Promise<ExecutionResult>
   }
 
   enforceAllowedTokens(job, tokens);
-  enforceSpendLimits(job, amount);
+  await enforceSpendLimits(job, amount);
 
   const slippageBps =
     typeof policy.slippageBps === "number" && Number.isFinite(policy.slippageBps) ? policy.slippageBps : 100;
 
   if (isRealTradingExecutionEnabled()) {
-    const storedAgent = getStoredAgent(job.agentId);
+    const storedAgent = await getStoredAgent(job.agentId);
     if (!storedAgent) {
       throw new Error("Stored agent not found");
     }
@@ -401,7 +398,7 @@ async function executeFarmingAutomation(job: AgentJob): Promise<ExecutionResult>
   const requiredInputTokens =
     protocol.trim().toLowerCase() === "demo-farm" ? ["HLUSD"] : poolType.split(/[/:_\-\s]+/).filter(Boolean);
   enforceAllowedTokens(job, requiredInputTokens);
-  enforceSpendLimits(job, amount);
+  await enforceSpendLimits(job, amount);
   const lpData = await simulateLPPosition(`${protocol}:${poolType}`);
   const projectedEarnings = Number((amount * (lpData.apy / 100) * (durationDays / 365)).toFixed(6));
 
@@ -410,7 +407,7 @@ async function executeFarmingAutomation(job: AgentJob): Promise<ExecutionResult>
     protocol.trim().toLowerCase() === "demo-farm" &&
     !isTemplateAutomationPlaceholder(job.agentId)
   ) {
-    const storedAgent = getStoredAgent(job.agentId);
+    const storedAgent = await getStoredAgent(job.agentId);
     if (storedAgent) {
       const deposit = await executeFarmingDeposit({
         agentWalletPrivateKey: storedAgent.agentWalletPrivateKey,
@@ -517,10 +514,10 @@ async function executeRebalancingAutomation(job: AgentJob): Promise<ExecutionRes
     mostUnderweight &&
     !isTemplateAutomationPlaceholder(job.agentId)
   ) {
-    const storedAgent = getStoredAgent(job.agentId);
+    const storedAgent = await getStoredAgent(job.agentId);
     if (storedAgent) {
       const realSwapAmount = realSwapCandidateAmount ?? 1;
-      enforceSpendLimits(job, realSwapAmount);
+      await enforceSpendLimits(job, realSwapAmount);
 
       const swap = await executeTokenSwap({
         agentWalletPrivateKey: storedAgent.agentWalletPrivateKey,
@@ -552,7 +549,7 @@ async function executeRebalancingAutomation(job: AgentJob): Promise<ExecutionRes
     }
   }
 
-  enforceSpendLimits(job, estimatedSpend);
+  await enforceSpendLimits(job, estimatedSpend);
 
   return {
     success: true,
@@ -594,7 +591,7 @@ async function executeTemplateAutomation(job: AgentJob, agentType: string): Prom
 }
 
 async function executeJob(job: AgentJob) {
-  const storedAgent = getStoredAgent(job.agentId);
+  const storedAgent = await getStoredAgent(job.agentId);
   if (!storedAgent) {
     throw new Error("Stored agent not found");
   }
@@ -627,7 +624,7 @@ async function processJobWithOptions(job: AgentJob, options: ProcessJobOptions =
     const executionLogTxHash = await logExecutionOnChain(job, result).catch(() => result.txHash);
     const nextRunAt = addFrequency(startedAt, job.frequency).toISOString();
 
-    updateAgentJob(job.id, (current) => ({
+    await updateAgentJob(job.id, (current) => ({
       ...current,
       status: options.preserveStatus ? current.status : "active",
       nextRunAt: options.preserveNextRunAt ? current.nextRunAt : nextRunAt,
@@ -637,7 +634,7 @@ async function processJobWithOptions(job: AgentJob, options: ProcessJobOptions =
       lastExecutionTxHash: executionLogTxHash || result.txHash
     }));
 
-    appendExecutionLog({
+    await appendExecutionLog({
       agentId: job.agentId,
       ownerAddress: job.ownerAddress,
       jobId: job.id,
@@ -655,14 +652,14 @@ async function processJobWithOptions(job: AgentJob, options: ProcessJobOptions =
   } catch (error) {
     const message = toErrorMessage(error);
 
-    updateAgentJob(job.id, (current) => ({
+    await updateAgentJob(job.id, (current) => ({
       ...current,
       status: "error",
       lastRunAt: startedAt.toISOString(),
       lastError: message
     }));
 
-    appendExecutionLog({
+    await appendExecutionLog({
       agentId: job.agentId,
       ownerAddress: job.ownerAddress,
       jobId: job.id,
@@ -680,7 +677,7 @@ async function processJobWithOptions(job: AgentJob, options: ProcessJobOptions =
 }
 
 export async function processJobById(jobId: string) {
-  const job = getAgentJob(jobId);
+  const job = await getAgentJob(jobId);
   if (!job) {
     throw new Error("Automation job not found");
   }
@@ -693,7 +690,7 @@ export async function processJobById(jobId: string) {
 }
 
 export async function processDueJobs(referenceTime = new Date().toISOString()) {
-  const dueJobs = listDueJobs(referenceTime);
+  const dueJobs = await listDueJobs(referenceTime);
   const results = [];
 
   for (const job of dueJobs) {

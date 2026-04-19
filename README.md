@@ -244,6 +244,100 @@ Do not commit `.env`.
 npm run dev
 ```
 
+## Production Recommendation
+
+### Database
+
+For deployment beyond a local demo, Supabase is the right next step.
+
+Why:
+- the current automation state is still stored in `data/automation-store.json`
+- that is fine for local demos, but not for Cloud Run or multi-instance deployment
+- Supabase gives you:
+  - managed Postgres
+  - auth if you want it later
+  - a clean SQL backend for jobs, logs, agent wallets, and execution history
+
+Recommended migration target:
+- `stored_agents`
+- `agent_jobs`
+- `execution_logs`
+
+This repo now includes the first migration scaffold:
+- [supabase/schema.sql](supabase/schema.sql)
+- [lib/supabaseAdmin.ts](lib/supabaseAdmin.ts)
+- [lib/automationStore.ts](lib/automationStore.ts) with:
+  - `AUTOMATION_STORE_PROVIDER=json` fallback
+  - `AUTOMATION_STORE_PROVIDER=supabase` for database-backed persistence
+- [scripts/migrateAutomationStoreToSupabase.js](scripts/migrateAutomationStoreToSupabase.js) to import local demo data
+
+Short version:
+- `local demo` -> JSON store is okay
+- `real deployment` -> move persistence to Supabase
+
+### App Hosting
+
+Recommended production hosting:
+- frontend + API routes: `Google Cloud Run`
+- database: `Supabase Postgres`
+
+This repo now includes:
+- [Dockerfile](Dockerfile)
+- [cloudbuild.yaml](cloudbuild.yaml)
+- [scripts/deploy-gcp.sh](scripts/deploy-gcp.sh)
+
+## Deploying To Google Cloud Run
+
+### 1. Prepare Artifact Registry
+
+Create a Docker repository, for example:
+- repository name: `trovia`
+- region: `asia-south1`
+
+### 2. Set deploy env vars locally
+
+```bash
+export GCP_PROJECT_ID=your-gcp-project-id
+export GCP_REGION=asia-south1
+export GCP_CLOUD_RUN_SERVICE=trovia-app
+export GCP_ARTIFACT_REPOSITORY=trovia
+export GCP_IMAGE_NAME=trovia-app
+export GCP_IMAGE_TAG=latest
+```
+
+### 3. Deploy
+
+```bash
+npm run deploy:gcp
+```
+
+That command:
+- builds the app container
+- pushes it to Artifact Registry
+- deploys it to Cloud Run
+
+### 4. Important runtime note
+
+If you deploy to Cloud Run without migrating persistence away from the JSON file store, automation state will not be reliable across instances or restarts.
+
+So the safe production order is:
+1. move automation storage to Supabase
+2. then deploy the app to Cloud Run
+
+### Applying the Supabase schema
+
+Apply [supabase/schema.sql](supabase/schema.sql) in your Supabase SQL editor, then migrate local data if needed:
+
+```bash
+npm run automation:migrate:supabase
+```
+
+After that, switch the app to the database-backed store:
+
+```env
+AUTOMATION_STORE_PROVIDER=supabase
+```
+
 ### 5. Start the automation worker
 
 Run this in a second terminal:

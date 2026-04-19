@@ -53,7 +53,7 @@ export function isTemplateAutomationPlaceholder(executionCode: string) {
 }
 
 export async function ensureStoredAgentForAutomation(agentId: string): Promise<StoredAgent> {
-  const existing = getStoredAgent(agentId);
+  const existing = await getStoredAgent(agentId);
   if (existing) {
     return existing;
   }
@@ -72,6 +72,6 @@ export async function ensureStoredAgentForAutomation(agentId: string): Promise<S
     status: "active"
   };
 
-  upsertStoredAgent(record);
+  await upsertStoredAgent(record);
   return record;
 }

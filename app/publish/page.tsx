@@ -393,7 +393,7 @@ export default function PublishPage() {
         );
       }
 
-      setLastTxHash(deployPayload.txHash);
+      setLastTxHash("txHash" in deployPayload ? (deployPayload.txHash ?? null) : null);
       setStatusMessage("Agent runtime deployed and published on-chain.");
 
       setFormData({

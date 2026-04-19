@@ -166,12 +166,12 @@ function parseTokenList(value: unknown, target: AllocationMap): TokenConfig[] {
 
   return Object.keys(target)
     .map((symbol) => symbol.toUpperCase())
-    .map((symbol) => ({
+    .map((symbol): TokenConfig => ({
       symbol,
       address: DEFAULT_TOKEN_METADATA[symbol]?.address,
       coingeckoId: DEFAULT_TOKEN_METADATA[symbol]?.coingeckoId
     }))
-    .filter((entry): entry is TokenConfig => typeof entry.address === "string");
+    .filter((entry) => typeof entry.address === "string");
 }
 
 function parseBody(body: unknown): RebalancingConfig {

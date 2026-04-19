@@ -10,7 +10,7 @@ type RouteContext = {
 
 export async function GET(_req: Request, context: RouteContext) {
   const agentId = context.params.agentId;
-  const storedAgent = getStoredAgent(agentId);
+  const storedAgent = await getStoredAgent(agentId);
   let automationReady = Boolean(storedAgent);
 
   if (!automationReady) {

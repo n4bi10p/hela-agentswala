@@ -11,8 +11,8 @@ export async function GET(req: Request) {
   }
 
   const jobs = await Promise.all(
-    listJobsForOwner(ownerAddress).map(async (job) => {
-      const storedAgent = getStoredAgent(job.agentId);
+    (await listJobsForOwner(ownerAddress)).map(async (job) => {
+      const storedAgent = await getStoredAgent(job.agentId);
       const agentWalletAddress = storedAgent?.agentWalletAddress || null;
       const funding = await getFundingSnapshot(agentWalletAddress, job, storedAgent?.agent.agentType || null);
 
@@ -25,7 +25,7 @@ export async function GET(req: Request) {
     })
   );
 
-  const logs = listExecutionLogsForOwner(ownerAddress);
+  const logs = await listExecutionLogsForOwner(ownerAddress);
 
   return NextResponse.json(
     {
