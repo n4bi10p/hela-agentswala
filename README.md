@@ -501,7 +501,7 @@ Add your final links here before submission:
 
 - `Demo URL`: https://trovia-app-586045943972.asia-south1.run.app
 - `Demo Video`: TODO
-- `Presentation Deck`: TODO
+- `Presentation Deck`: https://docs.google.com/presentation/d/1pjsbKBlZ8PhfKQc-EhE5uLwmwsiudSTedIe1JOMuw60/edit?usp=sharing
 - `System Design Diagram`: TODO
 
 ### 5. Start the automation worker
