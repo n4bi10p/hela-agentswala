@@ -1,4 +1,10 @@
-# Trovia
+<h1 align="center">Trovia</h1>
+
+
+<p align="center">
+  <img width="865" height="473" alt="logotrovia" src="https://github.com/user-attachments/assets/93374861-4c3e-4c1b-83dd-360c4f367806" />
+</p>
+
 
 Trovia is an on-chain AI agent marketplace built on HeLa testnet where developers publish agents, users activate them with HLUSD, and agent usage plus automation can be tracked on-chain.
 
