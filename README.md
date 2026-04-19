@@ -496,6 +496,26 @@ This repository is our DevClash submission for the Web3 track. The key submissio
 - `Presentation Deck`: https://docs.google.com/presentation/d/1pjsbKBlZ8PhfKQc-EhE5uLwmwsiudSTedIe1JOMuw60/edit?usp=sharing
 - `System Design Diagram`: TODO
 
+## Deployment Addresses
+
+Current HeLa testnet deployment addresses:
+
+- `HLUSD`: `0x6fEF5d9fe6051dED5cC838feD792c36252DF12bf`
+- `AgentRegistry`: `0xE6E5DE5752f223FacBc28b492f78eF689C937a47`
+- `AgentEscrow`: `0xe8263ffF468136843Df504326FC958563Ce968be`
+- `AgentExecutor`: `0x65088ea52246f09ca0Be6aB5286Bb29095E38a75`
+- `Trading Demo Router`: `0x16eADe32E1eCefc7029F463e3589d710deF9DD5f`
+- `Trading Demo Quote Token (DUSDC)`: `0x1e7b8F4FAb0129E4A92dF791C73C2258aBFF1151`
+- `Farming Demo Vault`: `0x0b9E69d9146A74E4AB78eCCC29098d9e4b211189`
+
+## Example Transactions
+
+Three real example HeLa testnet transactions from Trovia flows:
+
+- `Agent Activation (15 HLUSD with 5% fee split)`: `0x80b57926f2263d355b2f39e9551a849c85df54eca17ac382de280b4105a9454e`
+- `Scheduling Transfer Execution`: `0x503d095a1c324e1371cc1467b55b50cb1d53ab1aa78f7bc4dedde1dacf0e1e2f`
+- `Farming Deposit Execution`: `0xad7c80b58882ecab6c691128bd1889e2b09aa38acfa4acae13c44aef8640aece`
+
 ### 5. Start the automation worker
 
 Run this in a second terminal:
