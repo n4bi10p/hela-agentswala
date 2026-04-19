@@ -489,9 +489,16 @@ async function callRebalancingAgent(message: string, config: StoredAgentConfig):
 }
 
 async function callSchedulingAgent(message: string, config: StoredAgentConfig): Promise<string> {
+  const recipient =
+    readText(config, "Recipient", "") ||
+    readText(config, "Recipient Address", "0x4E81d5892034B31f9d36F903605940f697446B6b");
+  const amount =
+    readNumber(config, "Amount", Number.NaN) ||
+    readNumber(config, "Amount (HLUSD)", 1);
+
   const payload = {
-    recipient: readText(config, "Recipient Address", "0x4E81d5892034B31f9d36F903605940f697446B6b"),
-    amount: readNumber(config, "Amount (HLUSD)", 1),
+    recipient,
+    amount: Number.isFinite(amount) && amount > 0 ? amount : 1,
     token: "HLUSD",
     frequency: normalizeMonitorFrequency(readText(config, "Frequency", "daily")),
     note: message

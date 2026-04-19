@@ -6,7 +6,11 @@ import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { parseUnits } from "ethers";
-import { activateAgent as activateAgentOnChain, getPublicContractAddresses } from "@/lib/contracts";
+import {
+  activateAgent as activateAgentOnChain,
+  getPublicContractAddresses,
+  isAgentActivatedByUser
+} from "@/lib/contracts";
 import { calculateDeveloperPayout, calculatePlatformFee, PLATFORM_FEE_PERCENT } from "@/lib/platformFee";
 import { approveHLUSD, connectWallet, ensureHeLaNetwork, getConnectedAccount, transferHLUSD } from "@/lib/wallet";
 import { getAgentImage, parseConfigSchema } from "@/lib/agentUi";
@@ -880,7 +884,12 @@ export default function AgentDetailPage() {
       }
 
       await ensureHeLaNetwork();
-      await connectWallet();
+      const account = (await getConnectedAccount()) || (await connectWallet());
+
+      const alreadyActivated = await isAgentActivatedByUser(account, Number(agentId));
+      if (alreadyActivated) {
+        throw new Error("This wallet has already activated this agent.");
+      }
 
       const price = Number(agent.price);
       if (!Number.isFinite(price) || price < 0) {

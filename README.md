@@ -14,6 +14,25 @@ The platform is designed around a freelancer-friendly flow:
 - agents can run manually or through scheduled automation
 - revenue is split between the creator and the platform
 
+## DevClash Submission
+
+- `Track`: Web3
+- `Problem Statement`: PS 03 — Agent Marketplace
+- `One-line Description`: A freelancer-focused on-chain AI agent marketplace on HeLa where developers publish agents, buyers activate them with HLUSD, and autonomous agent actions are funded, tracked, and executed on-chain.
+
+## Why This Fits PS 03
+
+Trovia directly implements the required Web3 track marketplace brief:
+
+- `Trading Agent`
+- `Farming Agent`
+- `Scheduling Agent`
+- `Portfolio Rebalancing Agent`
+- `Content Reply Agent`
+- `Business Assistant Agent`
+
+All six required marketplace agents are live in the project, deployed on HeLa, purchasable through the on-chain activation flow, and usable through manual or automated execution paths.
+
 ## What Is Live
 
 Trovia currently supports 6 live agent categories:
@@ -50,6 +69,20 @@ The finance-oriented agents also support real demo execution paths:
 - Funding agent wallets with HLUSD and gas
 - Recurring automation worker
 - Demo trading router and demo farming vault
+- Supabase-backed automation persistence scaffold
+- Google Cloud Run deployment scaffold
+
+## AI Tools Used
+
+AI tools were used with review, adaptation, and full understanding by the team.
+
+- `Antigravity` — used for UI ideation and interface direction
+- `Stitch` — used to help shape and refine the UI design
+- `Claude` — used during backend development and implementation support
+- `Codex` — used for backend development, frontend integration, debugging, and deployment setup
+- `Google Gemini` — used inside the product for agent generation, business/content flows, and safety review
+
+The team reviewed and adapted AI-assisted outputs rather than treating them as blind copy-paste code.
 
 ## Platform Fee
 
@@ -86,6 +119,38 @@ Automation:
   worker loop
 ```
 
+## System Design Summary
+
+Trovia is built as a layered Web3 application:
+
+1. `Frontend`
+- Next.js App Router UI for marketplace, agent detail, run pages, publish flow, pricing, and dashboard
+
+2. `Backend/API`
+- Next.js API routes for:
+  - agent logic
+  - generation
+  - safety review
+  - deployment helpers
+  - automation jobs
+  - funding and execution control
+
+3. `On-chain Contracts`
+- `AgentRegistry` for marketplace listings
+- `AgentEscrow` for HLUSD activation payment and 5% platform fee split
+- `AgentExecutor` for on-chain execution logging
+
+4. `Automation Layer`
+- isolated agent wallets
+- recurring job scheduling
+- funding readiness checks
+- `run now`, `pause`, `resume`
+- always-on worker mode
+
+5. `Persistence`
+- local JSON store for demo fallback
+- Supabase/Postgres migration path for real deployment
+
 ## Repo Structure
 
 ```text
@@ -97,6 +162,7 @@ scripts/             Deploy, seed, verify, worker scripts
 test/                Hardhat contract tests
 deployments/         Deployment artifacts
 data/                Local automation store for demo/runtime state
+supabase/            Supabase SQL schema for production persistence
 ```
 
 ## Smart Contracts
@@ -244,6 +310,16 @@ Do not commit `.env`.
 npm run dev
 ```
 
+### 5. Start the automation worker
+
+In a second terminal:
+
+```bash
+npm run automation:watch
+```
+
+This keeps due automation jobs running continuously during a live demo.
+
 ## Production Recommendation
 
 ### Database
@@ -337,6 +413,96 @@ After that, switch the app to the database-backed store:
 ```env
 AUTOMATION_STORE_PROVIDER=supabase
 ```
+
+## Judge Run Guide
+
+This is the shortest reliable path for judges to run the project locally.
+
+### 1. Prerequisites
+
+- Node `22`
+- npm
+- MetaMask or any injected EVM wallet
+- HeLa testnet network added to the wallet
+
+### 2. Install dependencies
+
+```bash
+npm install
+```
+
+### 3. Configure environment
+
+Fill `.env` using `.env.example`.
+
+Minimum keys needed:
+
+```env
+HELA_RPC_URL=
+HELA_CHAIN_ID=666888
+HLUSD_ADDRESS=
+PRIVATE_KEY=
+HELA_PRIVATE_KEY=
+GEMINI_API_KEY=
+NEXT_PUBLIC_HELA_RPC=
+NEXT_PUBLIC_HLUSD_ADDRESS=
+NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS=
+NEXT_PUBLIC_AGENT_ESCROW_ADDRESS=
+NEXT_PUBLIC_AGENT_EXECUTOR_ADDRESS=
+NEXT_PUBLIC_PLATFORM_FEE_BPS=500
+```
+
+If running with Supabase persistence:
+
+```env
+AUTOMATION_STORE_PROVIDER=supabase
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+```
+
+### 4. Start app and worker
+
+```bash
+npm run dev
+npm run automation:watch
+```
+
+### 5. Manual demo flow
+
+1. Open `/marketplace`
+2. Open any agent detail page
+3. Activate the agent with HLUSD
+4. Open interaction or create automation
+5. Fund the agent wallet if required
+6. Run the job and verify the result in `/dashboard`
+
+### 6. Live agent expectations
+
+- `Trading` -> threshold analysis and demo swap execution
+- `Farming` -> farming review and demo farm deposit
+- `Scheduling` -> recurring HLUSD payment automation
+- `Rebalancing` -> drift analysis and rebalance swap
+- `Content` -> content generation and automation
+- `Business` -> business drafting and automation
+
+## Demo Deliverables
+
+For final submission, keep these ready:
+
+- public repository link
+- deployed demo link or local demo walkthrough
+- 3-5 minute demo video
+- PPT/PDF presentation deck
+- system design diagram
+
+Add your final links here before submission:
+
+- `Demo URL`: https://trovia-app-586045943972.asia-south1.run.app
+- `Demo Video`: TODO
+- `Presentation Deck`: TODO
+- `System Design Diagram`: TODO
 
 ### 5. Start the automation worker
 
