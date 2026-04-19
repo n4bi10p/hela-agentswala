@@ -489,15 +489,7 @@ npm run automation:watch
 
 ## Demo Deliverables
 
-For final submission, keep these ready:
-
-- public repository link
-- deployed demo link or local demo walkthrough
-- 3-5 minute demo video
-- PPT/PDF presentation deck
-- system design diagram
-
-Add your final links here before submission:
+This repository is our DevClash submission for the Web3 track. The key submission links are below:
 
 - `Demo URL`: https://trovia-app-586045943972.asia-south1.run.app
 - `Demo Video`: TODO
