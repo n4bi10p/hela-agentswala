@@ -1,13 +1,12 @@
-import { ethers } from "hardhat";
-import dotenv from "dotenv";
-import fs from "fs";
-import path from "path";
-import { isAddress } from "ethers";
-import { network } from "hardhat";
+const hre = require("hardhat");
+const dotenv = require("dotenv");
+const fs = require("fs");
+const path = require("path");
+const { isAddress } = require("ethers");
 
 dotenv.config();
 
-function requireAddress(name: string, value: string | undefined): string {
+function requireAddress(name, value) {
   if (!value) {
     throw new Error(`${name} is required in .env`);
   }
@@ -18,6 +17,8 @@ function requireAddress(name: string, value: string | undefined): string {
 }
 
 async function main() {
+  const { ethers, network } = hre;
+
   const hlusdAddress = requireAddress("HLUSD_ADDRESS", process.env.HLUSD_ADDRESS);
   const explorerUrl = process.env.HELA_EXPLORER_URL || "";
   const platformFeeRecipient = process.env.PLATFORM_FEE_RECIPIENT || "";

@@ -5,7 +5,10 @@ import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { connectWallet, ensureHeLaNetwork, getConnectedAccount, transferHLUSD } from "@/lib/wallet";
+import { parseUnits } from "ethers";
+import { activateAgent as activateAgentOnChain, getPublicContractAddresses } from "@/lib/contracts";
+import { calculateDeveloperPayout, calculatePlatformFee, PLATFORM_FEE_PERCENT } from "@/lib/platformFee";
+import { approveHLUSD, connectWallet, ensureHeLaNetwork, getConnectedAccount, transferHLUSD } from "@/lib/wallet";
 import { getAgentImage, parseConfigSchema } from "@/lib/agentUi";
 
 const AGENTS: Record<
@@ -276,9 +279,15 @@ function toConfigFields(configSchema: string): AgentProfile["config"] {
   }));
 }
 
+function findPresetByType(agentType: string) {
+  const normalizedType = agentType.trim().toUpperCase();
+  return Object.values(AGENTS).find((agent) => agent.type === normalizedType) || null;
+}
+
 function toAgentProfile(remoteAgent: RemoteAgent): AgentProfile {
-  const preset = AGENTS[String(remoteAgent.id)];
   const fallbackType = (remoteAgent.type || remoteAgent.agentType || "agent").toUpperCase();
+  const preset = findPresetByType(fallbackType);
+  const parsedConfig = toConfigFields(remoteAgent.configSchema);
 
   return {
     id: remoteAgent.id,
@@ -293,7 +302,7 @@ function toAgentProfile(remoteAgent: RemoteAgent): AgentProfile {
     price: remoteAgent.price,
     activeCount: remoteAgent.activeCount,
     isLive: remoteAgent.isLive,
-    config: preset?.config || toConfigFields(remoteAgent.configSchema)
+    config: parsedConfig.length > 0 ? parsedConfig : (preset?.config || [])
   };
 }
 
@@ -613,7 +622,7 @@ function buildActivationRequest(agentType: string, agentId: string, formData: Re
   if (normalizedType === "SCHEDULING") {
     const amount = parseNumberFromAliases(
       formData,
-      ["Amount (HLUSD)", "amount", "stipendAmountHLUSD", "Monthly Stipend Amount (HLUSD)"],
+      ["Amount (HLUSD)", "Amount", "amount", "stipendAmountHLUSD", "Monthly Stipend Amount (HLUSD)"],
       1
     );
     const frequencyRaw = readFirstField(formData, ["Frequency", "frequency"]).toLowerCase();
@@ -627,7 +636,7 @@ function buildActivationRequest(agentType: string, agentId: string, formData: Re
       payload: {
         recipient: readFirstField(
           formData,
-          ["Recipient Address", "recipient", "recipientAddress", "Recipient Wallet Address"]
+          ["Recipient", "Recipient Address", "recipient", "recipientAddress", "Recipient Wallet Address"]
         ),
         amount,
         frequency,
@@ -691,6 +700,13 @@ function buildActivationRequest(agentType: string, agentId: string, formData: Re
       userConfig: genericConfig
     }
   };
+}
+
+function buildActivationConfig(agentType: string, payload: Record<string, unknown>): string {
+  return JSON.stringify({
+    agentType: agentType.trim().toLowerCase(),
+    ...payload
+  });
 }
 
 export default function AgentDetailPage() {
@@ -814,6 +830,8 @@ export default function AgentDetailPage() {
 
   const agent = useMemo(() => agentFromBackend || localAgent || null, [agentFromBackend, localAgent]);
   const automationAgentType = agentFromBackend?.type || localAgent?.type || "";
+  const platformFee = useMemo(() => (agent ? calculatePlatformFee(agent.price) : 0), [agent]);
+  const developerPayout = useMemo(() => (agent ? calculateDeveloperPayout(agent.price) : 0), [agent]);
 
   useEffect(() => {
     if (automationAgentType) {
@@ -846,6 +864,7 @@ export default function AgentDetailPage() {
 
     try {
       const { endpoint, payload } = buildActivationRequest(agent.type, agentId, formData);
+      const activationConfig = buildActivationConfig(agent.type, payload);
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
@@ -859,11 +878,26 @@ export default function AgentDetailPage() {
         throw new Error(data.error || "Activation request failed.");
       }
 
+      await ensureHeLaNetwork();
+      await connectWallet();
+
+      const price = Number(agent.price);
+      if (!Number.isFinite(price) || price < 0) {
+        throw new Error("Agent price is invalid.");
+      }
+
+      if (price > 0) {
+        const { escrow } = getPublicContractAddresses();
+        await approveHLUSD(escrow, parseUnits(String(price), 18));
+      }
+
+      const txResult = await activateAgentOnChain(Number(agentId), activationConfig);
+
       if (typeof window !== "undefined") {
         window.localStorage.setItem(`agent-config-${agentId}`, JSON.stringify(formData));
       }
 
-      setActivationSuccess(`Agent ${agent.name} activated successfully.`);
+      setActivationSuccess(`Agent ${agent.name} activated on-chain. Tx: ${txResult.hash}`);
     } catch (error: unknown) {
       setActivationError(error instanceof Error ? error.message : "Activation failed.");
     } finally {
@@ -1252,8 +1286,11 @@ export default function AgentDetailPage() {
               <p className="font-headline text-4xl text-white">{agent.activeCount}</p>
             </div>
             <div>
-              <p className="font-mono text-xs uppercase text-white/60">Price/Hour</p>
+              <p className="font-mono text-xs uppercase text-white/60">Activation Price</p>
               <p className="font-headline text-4xl text-white">{agent.price} HLUSD</p>
+              <p className="mt-2 font-mono text-[10px] uppercase text-white/40">
+                {PLATFORM_FEE_PERCENT}% platform fee included
+              </p>
             </div>
             <div>
               <p className="font-mono text-xs uppercase text-white/60">Status</p>
@@ -1261,6 +1298,14 @@ export default function AgentDetailPage() {
                 <span className={`h-3 w-3 rounded-full ${agent.isLive ? "bg-live-signal" : "bg-white/20"}`}></span>
                 <span className="font-mono text-sm uppercase">{agent.isLive ? "LIVE" : "IDLE"}</span>
               </div>
+            </div>
+            <div>
+              <p className="font-mono text-xs uppercase text-white/60">Developer Receives</p>
+              <p className="font-headline text-2xl text-white">{developerPayout} HLUSD</p>
+            </div>
+            <div>
+              <p className="font-mono text-xs uppercase text-white/60">Trovia Receives</p>
+              <p className="font-headline text-2xl text-white">{platformFee} HLUSD</p>
             </div>
           </div>
         </div>
@@ -1280,6 +1325,15 @@ export default function AgentDetailPage() {
 
           <div className="flex flex-col gap-6 border border-white/12 p-6">
             <h2 className="font-headline text-2xl uppercase text-white">Configuration</h2>
+
+            <div className="border border-white/12 bg-white/[0.03] p-4">
+              <p className="font-mono text-xs uppercase text-white/60">Activation Pricing</p>
+              <p className="mt-2 font-headline text-3xl text-white">{agent.price} HLUSD total</p>
+              <p className="mt-3 font-mono text-[11px] uppercase leading-relaxed text-white/50">
+                {PLATFORM_FEE_PERCENT}% platform fee included. Developer receives {developerPayout} HLUSD and
+                Trovia receives {platformFee} HLUSD per activation.
+              </p>
+            </div>
 
             <div className="flex flex-col gap-4">
               {agent.config.map((configItem, idx) => (

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PLATFORM_FEE_PERCENT } from "@/lib/platformFee";
 
 interface AgentCardProps {
   id: number;
@@ -62,6 +63,10 @@ export function AgentCard({
           [ {price} HLUSD ]
         </span>
       </div>
+
+      <p className="font-mono text-[10px] uppercase text-white/40">
+        {PLATFORM_FEE_PERCENT}% platform fee included in activation price
+      </p>
 
       <Link
         href={`/agent/${id}`}

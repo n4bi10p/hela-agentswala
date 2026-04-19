@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
+import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs.js";
 
 describe("HeLa Agent Bazaar contracts", function () {
   async function deployFixture() {
@@ -16,14 +16,20 @@ describe("HeLa Agent Bazaar contracts", function () {
     await token.waitForDeployment();
 
     const escrowFactory = await ethers.getContractFactory("AgentEscrow");
-    const escrow = await escrowFactory.deploy(await registry.getAddress(), await token.getAddress());
+    const platformFeeBps = 500;
+    const escrow = await escrowFactory.deploy(
+      await registry.getAddress(),
+      await token.getAddress(),
+      owner.address,
+      platformFeeBps
+    );
     await escrow.waitForDeployment();
 
     const executorFactory = await ethers.getContractFactory("AgentExecutor");
     const executor = await executorFactory.deploy();
     await executor.waitForDeployment();
 
-    return { owner, developer, buyer, outsider, registry, token, escrow, executor };
+    return { owner, developer, buyer, outsider, registry, token, escrow, executor, platformFeeBps };
   }
 
   describe("AgentRegistry", function () {
@@ -125,10 +131,12 @@ describe("HeLa Agent Bazaar contracts", function () {
   });
 
   describe("AgentEscrow", function () {
-    it("activates paid agents and pays developer", async function () {
-      const { registry, token, escrow, developer, buyer } = await loadFixture(deployFixture);
+    it("activates paid agents and splits the payment between developer and platform", async function () {
+      const { owner, registry, token, escrow, developer, buyer, platformFeeBps } = await loadFixture(deployFixture);
 
       const price = ethers.parseUnits("10", 18);
+      const expectedPlatformFee = (price * BigInt(platformFeeBps)) / 10_000n;
+      const expectedDeveloperPayout = price - expectedPlatformFee;
       await registry.connect(developer).publishAgent(
         "Trading Agent",
         "Threshold watcher",
@@ -144,7 +152,8 @@ describe("HeLa Agent Bazaar contracts", function () {
         .to.emit(escrow, "AgentActivated")
         .withArgs(1n, 1n, buyer.address, '{"threshold":"0.98"}', price, anyValue);
 
-      expect(await token.balanceOf(developer.address)).to.equal(price);
+      expect(await token.balanceOf(developer.address)).to.equal(expectedDeveloperPayout);
+      expect(await token.balanceOf(owner.address)).to.equal(expectedPlatformFee);
       expect(await escrow.getActivationCountForAgent(1)).to.equal(1n);
       expect(await escrow.activationCount()).to.equal(1n);
       expect(await escrow.userActiveAgents(buyer.address, 0)).to.equal(1n);
@@ -225,6 +234,28 @@ describe("HeLa Agent Bazaar contracts", function () {
       await token.setFailTransfer(true);
       await expect(escrow.connect(buyer).activateAgent(1, "{}"))
         .to.be.revertedWith("developer payout failed");
+    });
+
+    it("rejects invalid platform fee configuration", async function () {
+      const [owner] = await ethers.getSigners();
+
+      const registryFactory = await ethers.getContractFactory("AgentRegistry");
+      const registry = await registryFactory.deploy();
+      await registry.waitForDeployment();
+
+      const tokenFactory = await ethers.getContractFactory("MockERC20");
+      const token = await tokenFactory.deploy();
+      await token.waitForDeployment();
+
+      const escrowFactory = await ethers.getContractFactory("AgentEscrow");
+
+      await expect(
+        escrowFactory.deploy(await registry.getAddress(), await token.getAddress(), ethers.ZeroAddress, 500)
+      ).to.be.revertedWith("invalid fee recipient");
+
+      await expect(
+        escrowFactory.deploy(await registry.getAddress(), await token.getAddress(), owner.address, 10_001)
+      ).to.be.revertedWith("invalid fee bps");
     });
   });
 

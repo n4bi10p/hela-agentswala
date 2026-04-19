@@ -22,8 +22,11 @@ interface IAgentRegistry {
 }
 
 contract AgentEscrow {
+    uint256 public constant MAX_BPS = 10_000;
     IERC20 public immutable hlusd;
     IAgentRegistry public immutable registry;
+    address public immutable feeRecipient;
+    uint256 public immutable platformFeeBps;
     uint256 public activationCount;
 
     struct ActivationRecord {
@@ -48,12 +51,16 @@ contract AgentEscrow {
         uint256 timestamp
     );
 
-    constructor(address registryAddress, address hlusdAddress) {
+    constructor(address registryAddress, address hlusdAddress, address feeRecipientAddress, uint256 platformFeeBps_) {
         require(registryAddress != address(0), "invalid registry");
         require(hlusdAddress != address(0), "invalid hlusd");
+        require(feeRecipientAddress != address(0), "invalid fee recipient");
+        require(platformFeeBps_ <= MAX_BPS, "invalid fee bps");
 
         registry = IAgentRegistry(registryAddress);
         hlusd = IERC20(hlusdAddress);
+        feeRecipient = feeRecipientAddress;
+        platformFeeBps = platformFeeBps_;
     }
 
     function activateAgent(uint256 agentId, string calldata userConfig) external {
@@ -69,8 +76,16 @@ contract AgentEscrow {
             bool received = hlusd.transferFrom(msg.sender, address(this), agent.priceHLUSD);
             require(received, "payment failed");
 
-            bool paid = hlusd.transfer(agent.developer, agent.priceHLUSD);
-            require(paid, "developer payout failed");
+            uint256 platformAmount = (agent.priceHLUSD * platformFeeBps) / MAX_BPS;
+            uint256 developerAmount = agent.priceHLUSD - platformAmount;
+
+            if (platformAmount > 0) {
+                bool platformPaid = hlusd.transfer(feeRecipient, platformAmount);
+                require(platformPaid, "platform payout failed");
+            }
+
+            bool developerPaid = hlusd.transfer(agent.developer, developerAmount);
+            require(developerPaid, "developer payout failed");
 
             paidAmount = agent.priceHLUSD;
         }

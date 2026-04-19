@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { TopNavBar } from '@/components/TopNavBar';
 import { useReveal, useStaggerReveal } from '@/hooks/useScrollAnimation';
+import { PLATFORM_FEE_PERCENT } from '@/lib/platformFee';
 
 export default function PricingPage() {
   const headerRef = useReveal(0);
@@ -12,12 +13,12 @@ export default function PricingPage() {
   const ctaRef = useReveal(0);
 
   const agents = [
-    { name: "Trading Agent", price: "50", period: "per activation", features: ["Price monitoring", "Automated swaps", "Slippage protection"] },
-    { name: "Yield Orchestrator", price: "40", period: "per activation", features: ["LP yield tracking", "Auto-compound", "Risk alerts"] },
-    { name: "Social Sentinel", price: "30", period: "per activation", features: ["Content generation", "Multi-option replies", "AI-powered"] },
-    { name: "Arb Master Z", price: "60", period: "per activation", features: ["Arbitrage detection", "Cross-chain", "Fast execution"] },
-    { name: "Schedule Master", price: "25", period: "per activation", features: ["Recurring payments", "Flexible scheduling", "Low fees"] },
-    { name: "Business Assistant", price: "35", period: "per activation", features: ["Business insights", "Market analysis", "Strategic advice"] }
+    { name: "Trading Agent", price: "5", period: "per activation", features: ["Price monitoring", "Automated swaps", "Slippage protection"] },
+    { name: "Farming Agent", price: "5", period: "per activation", features: ["LP yield tracking", "Auto-compound", "Risk alerts"] },
+    { name: "Scheduling Agent", price: "3", period: "per activation", features: ["Recurring payments", "Flexible scheduling", "Low fees"] },
+    { name: "Portfolio Rebalancing Agent", price: "4", period: "per activation", features: ["Allocation drift checks", "Real swap rebalancing", "Guardrail controls"] },
+    { name: "Content Reply Agent", price: "2", period: "per activation", features: ["Content generation", "Multi-option replies", "Tone control"] },
+    { name: "Business Assistant Agent", price: "2", period: "per activation", features: ["Business insights", "Market analysis", "Strategic advice"] }
   ];
 
   return (
@@ -29,6 +30,9 @@ export default function PricingPage() {
             <span className="text-sm opacity-60 uppercase">[ PRICING ]</span>
             <h1 className="font-headline text-5xl font-bold mt-4 mb-4">Agent Pricing</h1>
             <p className="font-body text-lg opacity-80 mb-12">Simple, transparent pricing. Pay only for what you use.</p>
+            <p className="font-mono text-xs uppercase opacity-50 mb-12">
+              {PLATFORM_FEE_PERCENT}% platform fee is included inside each activation price.
+            </p>
           </div>
 
           <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
@@ -56,9 +60,10 @@ export default function PricingPage() {
                 ["Single Agent Activation", "Agent-specific price"],
                 ["Multiple Agents", "Stack discounts available"],
                 ["Execution Fees", "Included in activation"],
+                ["Platform Fee", `${PLATFORM_FEE_PERCENT}% included in activation price`],
                 ["Refunds", "Pro-rata based on usage"],
-              ].map(([label, value], i) => (
-                <div key={i} className={`flex justify-between items-center py-3 ${i < 3 ? "border-b border-white/10" : ""}`}>
+              ].map(([label, value], i, arr) => (
+                <div key={i} className={`flex justify-between items-center py-3 ${i < arr.length - 1 ? "border-b border-white/10" : ""}`}>
                   <span className="font-body">{label}</span>
                   <span className="font-bold">{value}</span>
                 </div>

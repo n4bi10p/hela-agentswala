@@ -7,6 +7,8 @@ type Deployment = {
   network: string;
   chainId: string;
   hlusdAddress: string;
+  platformFeeRecipient: string;
+  platformFeeBps: number;
   contracts: {
     agentRegistry: string;
     agentEscrow: string;
@@ -24,6 +26,9 @@ function readDeployment(): Deployment {
 
   if (!isAddress(deployment.hlusdAddress)) {
     throw new Error("Invalid HLUSD address in deployment file");
+  }
+  if (!isAddress(deployment.platformFeeRecipient)) {
+    throw new Error("Invalid platform fee recipient in deployment file");
   }
   if (!isAddress(deployment.contracts.agentRegistry)) {
     throw new Error("Invalid AgentRegistry address in deployment file");
@@ -63,7 +68,12 @@ async function main() {
   await verifyOne(deployment.contracts.agentRegistry, [], "AgentRegistry");
   await verifyOne(
     deployment.contracts.agentEscrow,
-    [deployment.contracts.agentRegistry, deployment.hlusdAddress],
+    [
+      deployment.contracts.agentRegistry,
+      deployment.hlusdAddress,
+      deployment.platformFeeRecipient,
+      deployment.platformFeeBps
+    ],
     "AgentEscrow"
   );
   await verifyOne(deployment.contracts.agentExecutor, [], "AgentExecutor");
