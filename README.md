@@ -1,5 +1,14 @@
 <h1 align="center">Trovia</h1>
 
+<p align="center">
+  <a href="https://youtu.be/4uzBng_q0rs?si=1A37Qr3d-ZDj7O4D" target="_blank" rel="noreferrer">
+    <img alt="Trovia Demo Video Preview" src="https://img.youtube.com/vi/4uzBng_q0rs/maxresdefault.jpg" width="720" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://youtu.be/4uzBng_q0rs?si=1A37Qr3d-ZDj7O4D">Watch Demo Video</a>
+</p>
 
 <p align="center">
   <img width="865" height="473" alt="logotrovia" src="https://github.com/user-attachments/assets/93374861-4c3e-4c1b-83dd-360c4f367806" />
@@ -492,7 +501,7 @@ npm run automation:watch
 This repository is our DevClash submission for the Web3 track. The key submission links are below:
 
 - `Demo URL`: https://trovia-app-586045943972.asia-south1.run.app
-- `Demo Video`: TODO
+- `Demo Video`: https://youtu.be/4uzBng_q0rs?si=1A37Qr3d-ZDj7O4D
 - `Presentation Deck`: https://docs.google.com/presentation/d/1pjsbKBlZ8PhfKQc-EhE5uLwmwsiudSTedIe1JOMuw60/edit?usp=sharing
 - `System Design Diagram`: [SYSTEM_DESIGN.md](SYSTEM_DESIGN.md)
 
