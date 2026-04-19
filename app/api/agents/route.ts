@@ -95,34 +95,20 @@ export async function GET() {
       }))
       .filter((agent) => !isHiddenAgentName(agent.name))
       .filter((agent) => !isMarketplaceExcluded(agent));
+    const sortedAgents = [...mappedAgents].sort((left, right) => {
+      const priorityDiff = getMarketplacePriority(right) - getMarketplacePriority(left);
+      if (priorityDiff !== 0) {
+        return priorityDiff;
+      }
 
-    const curatedByType = Array.from(
-      mappedAgents.reduce<Map<string, AgentListItem>>((acc, agent) => {
-        const key = agent.agentType.trim().toLowerCase();
-        const current = acc.get(key);
+      if (right.activeCount !== left.activeCount) {
+        return right.activeCount - left.activeCount;
+      }
 
-        if (!current) {
-          acc.set(key, agent);
-          return acc;
-        }
+      return left.id - right.id;
+    });
 
-        const currentPriority = getMarketplacePriority(current);
-        const nextPriority = getMarketplacePriority(agent);
-
-        if (
-          nextPriority > currentPriority ||
-          (nextPriority === currentPriority && agent.activeCount > current.activeCount) ||
-          (nextPriority === currentPriority && agent.activeCount === current.activeCount && agent.id < current.id)
-        ) {
-          acc.set(key, agent);
-        }
-
-        return acc;
-      }, new Map<string, AgentListItem>())
-        .values()
-    ).sort((left, right) => left.id - right.id);
-
-    return NextResponse.json({ agents: curatedByType }, { status: 200 });
+    return NextResponse.json({ agents: sortedAgents }, { status: 200 });
   } catch {
     return NextResponse.json({ error: "Failed to fetch agents." }, { status: 500 });
   }

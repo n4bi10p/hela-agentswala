@@ -9,10 +9,12 @@ type MarketplaceAgent = {
   name: string;
   description: string;
   type: string;
+  agentType?: string;
   image: string;
   price: number;
   activeCount: number;
   isLive: boolean;
+  developer?: string;
 };
 
 type AgentsRouteResponse = {

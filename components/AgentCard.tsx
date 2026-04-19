@@ -10,6 +10,19 @@ interface AgentCardProps {
   price: number;
   activeCount: number;
   isLive: boolean;
+  developer?: string;
+}
+
+function shortenAddress(address?: string): string | null {
+  if (!address) {
+    return null;
+  }
+
+  if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+    return address;
+  }
+
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
 export function AgentCard({
@@ -20,8 +33,11 @@ export function AgentCard({
   image,
   price,
   activeCount,
-  isLive
+  isLive,
+  developer
 }: AgentCardProps) {
+  const creatorLabel = shortenAddress(developer);
+
   return (
     <div className="group flex flex-col gap-6 border border-white/12 bg-surface-container-lowest p-6 transition-colors hover:border-white">
       <div className="flex items-start justify-between">
@@ -63,6 +79,12 @@ export function AgentCard({
           [ {price} HLUSD ]
         </span>
       </div>
+
+      {creatorLabel && (
+        <p className="font-mono text-[10px] uppercase text-white/50">
+          Creator: {creatorLabel}
+        </p>
+      )}
 
       <p className="font-mono text-[10px] uppercase text-white/40">
         {PLATFORM_FEE_PERCENT}% platform fee included in activation price

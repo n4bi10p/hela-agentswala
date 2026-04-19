@@ -17,6 +17,19 @@ type DashboardAgent = {
   executions: number;
 };
 
+type PublishedAgent = {
+  id: number;
+  name: string;
+  description: string;
+  type: string;
+  agentType: string;
+  isLive: boolean;
+  image: string;
+  price: number;
+  developer: string;
+  activeCount: number;
+};
+
 type ActivityItem = {
   id: string;
   kind: "activation" | "execution";
@@ -31,6 +44,7 @@ type ActivityItem = {
 type DashboardRouteResponse = {
   walletAddress?: string;
   activeAgents?: DashboardAgent[];
+  publishedAgents?: PublishedAgent[];
   activity?: ActivityItem[];
   error?: string;
 };
@@ -122,6 +136,14 @@ function formatDate(value: number | null): string {
   return new Date(normalizeTimestampMs(value)).toLocaleDateString();
 }
 
+function shortenAddress(address: string): string {
+  if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+    return address;
+  }
+
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
 function safeConfigPreview(config: Record<string, unknown>) {
   return Object.entries(config)
     .slice(0, 3)
@@ -187,6 +209,7 @@ function formatWalletBalance(job: AutomationJobView): string {
 export default function DashboardPage() {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [activeAgents, setActiveAgents] = useState<DashboardAgent[]>([]);
+  const [publishedAgents, setPublishedAgents] = useState<PublishedAgent[]>([]);
   const [activityLog, setActivityLog] = useState<ActivityItem[]>([]);
   const [automationJobs, setAutomationJobs] = useState<AutomationJobView[]>([]);
   const [automationLogs, setAutomationLogs] = useState<AutomationLogView[]>([]);
@@ -362,6 +385,7 @@ export default function DashboardPage() {
 
     setWalletAddress(dashboardData.walletAddress || address);
     setActiveAgents(Array.isArray(dashboardData.activeAgents) ? dashboardData.activeAgents : []);
+    setPublishedAgents(Array.isArray(dashboardData.publishedAgents) ? dashboardData.publishedAgents : []);
     setActivityLog(Array.isArray(dashboardData.activity) ? dashboardData.activity : []);
     setAutomationJobs(nextJobs);
     setAutomationLogs(nextLogs);
@@ -376,6 +400,7 @@ export default function DashboardPage() {
       if (!connected) {
         setWalletAddress(null);
         setActiveAgents([]);
+        setPublishedAgents([]);
         setActivityLog([]);
         setAutomationJobs([]);
         setAutomationLogs([]);
@@ -672,6 +697,58 @@ export default function DashboardPage() {
                         {activeJobActionId === `${job.id}:pause` ? "[ PAUSING... ]" : "[ PAUSE ↗ ]"}
                       </button>
                     )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mb-12">
+          <h2 className="mb-6 font-headline text-4xl uppercase text-white">Published By You</h2>
+
+          {publishedAgents.length === 0 ? (
+            <div className="border border-white/12 p-8 text-center">
+              <p className="font-mono text-xs uppercase text-white/60">
+                No published agents found for this wallet yet.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {publishedAgents.map((agent) => (
+                <div key={`published-${agent.id}`} className="group border border-white/12 p-6 transition-colors hover:border-white">
+                  <div className="mb-4 flex items-start justify-between">
+                    <div>
+                      <h3 className="font-headline text-2xl uppercase text-white">{agent.name}</h3>
+                      <p className="font-mono text-xs text-white/60">{agent.type}</p>
+                    </div>
+                    <div className={`flex items-center gap-2 font-mono text-xs ${agent.isLive ? "text-live-signal" : "text-white/20"}`}>
+                      <span className={`h-2 w-2 rounded-full ${agent.isLive ? "bg-live-signal" : "bg-white/20"}`}></span>
+                      {agent.isLive ? "LIVE" : "IDLE"}
+                    </div>
+                  </div>
+
+                  <p className="mb-4 font-body text-xs uppercase leading-relaxed text-white/60">{agent.description}</p>
+
+                  <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                    <div>
+                      <p className="font-mono text-xs uppercase text-white/60">Creator</p>
+                      <p className="font-mono text-sm text-white">{shortenAddress(agent.developer)}</p>
+                    </div>
+                    <div>
+                      <p className="font-mono text-xs uppercase text-white/60">Price</p>
+                      <p className="font-mono text-sm text-white">{agent.price} HLUSD</p>
+                    </div>
+                    <div>
+                      <p className="font-mono text-xs uppercase text-white/60">Activations</p>
+                      <p className="font-mono text-sm text-white">{agent.activeCount}</p>
+                    </div>
+                    <div>
+                      <p className="font-mono text-xs uppercase text-white/60">Open</p>
+                      <Link href={`/agent/${agent.id}`} className="font-mono text-sm text-white transition-colors hover:text-white/60">
+                        [ VIEW ↗ ]
+                      </Link>
+                    </div>
                   </div>
                 </div>
               ))}

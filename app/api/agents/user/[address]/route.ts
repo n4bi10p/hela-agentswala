@@ -1,6 +1,7 @@
 import { formatUnits } from "ethers";
 import { NextResponse } from "next/server";
 import {
+  fetchAgentActivationCount,
   fetchActivationEventsForUser,
   fetchAllAgents,
   fetchExecutionEventsForUser,
@@ -28,6 +29,19 @@ type ActivityItem = {
   details: string;
   timestamp: number;
   txHash: string;
+};
+
+type PublishedAgent = {
+  id: number;
+  name: string;
+  description: string;
+  type: string;
+  agentType: string;
+  isLive: boolean;
+  image: string;
+  price: number;
+  developer: string;
+  activeCount: number;
 };
 
 function isAddress(value: string): boolean {
@@ -96,6 +110,19 @@ export async function GET(_request: Request, { params }: RouteParams) {
 
     const uniqueActiveIds = Array.from(new Set(activeIds)).sort((left, right) => left - right);
 
+    const publishedVisibleAgents = visibleAgents.filter(
+      (agent) => agent.developer.toLowerCase() === address.toLowerCase()
+    );
+    const publishedActivationCounts = await Promise.all(
+      publishedVisibleAgents.map(async (agent) => {
+        try {
+          return await fetchAgentActivationCount(Number(agent.id));
+        } catch {
+          return 0;
+        }
+      })
+    );
+
     const activeAgents = uniqueActiveIds
       .map((agentId) => {
         const agent = agentMap.get(agentId);
@@ -121,6 +148,22 @@ export async function GET(_request: Request, { params }: RouteParams) {
         };
       })
       .filter((item): item is NonNullable<typeof item> => item !== null);
+
+    const publishedAgents: PublishedAgent[] = visibleAgents
+      .filter((agent) => agent.developer.toLowerCase() === address.toLowerCase())
+      .map((agent, index) => ({
+        id: Number(agent.id),
+        name: agent.name,
+        description: normalizeAgentDescription(agent.agentType, agent.description),
+        type: toAgentTypeLabel(agent.agentType),
+        agentType: agent.agentType,
+        isLive: agent.isActive,
+        image: getAgentImage(agent.agentType),
+        price: toPrice(agent.priceHLUSD),
+        developer: agent.developer,
+        activeCount: publishedActivationCounts[index] || 0
+      }))
+      .sort((left, right) => left.id - right.id);
 
     const activationActivity: ActivityItem[] = activationEvents
       .map((event) => {
@@ -170,6 +213,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
       {
         walletAddress: address,
         activeAgents,
+        publishedAgents,
         activity
       },
       { status: 200 }
