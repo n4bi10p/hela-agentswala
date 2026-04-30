@@ -1,14 +1,14 @@
 {
   "network": "helaTestnet",
   "chainId": "666888",
-  "timestamp": "2026-04-19T00:18:25.844Z",
+  "timestamp": "2026-04-30T07:06:22.990Z",
   "deployer": "0x4E81d5892034B31f9d36F903605940f697446B6b",
   "hlusdAddress": "0x6fEF5d9fe6051dED5cC838feD792c36252DF12bf",
   "platformFeeRecipient": "0xEEb6be7263E0876346a2FAc324aA8cc2Ca3a44ab",
   "platformFeeBps": 500,
   "contracts": {
-    "agentRegistry": "0xE6E5DE5752f223FacBc28b492f78eF689C937a47",
-    "agentEscrow": "0xe8263ffF468136843Df504326FC958563Ce968be",
-    "agentExecutor": "0x65088ea52246f09ca0Be6aB5286Bb29095E38a75"
+    "agentRegistry": "0x31b5453C8dFC9655D8d00AFcb534dDB9B16Fb191",
+    "agentEscrow": "0xF409fb1fc75e0d805a5EFa238FD276d5284aD9Dc",
+    "agentExecutor": "0x84Fe097bf2726e5ae3171DfA3Dc5D9584260d5FF"
   }
 }

@@ -1,10 +1,16 @@
 'use client';
 
+import { useState } from "react";
 import Link from "next/link";
 import { TopNavBar } from "@/components/TopNavBar";
+import { DottedSphere } from "@/components/DottedSphere";
+import { EmulatorEntry } from "@/components/EmulatorEntry";
+import { PremiumCardHero } from "@/components/PremiumCardHero";
 import { useReveal, useStaggerReveal, useParallax, useCountUp } from "@/hooks/useScrollAnimation";
 
 export default function Home() {
+  const [showLanding, setShowLanding] = useState(false);
+
   // Section reveals — each with different direction
   const howItWorksStagger = useStaggerReveal(150);
   const aboutHeadRef = useReveal(0);
@@ -29,19 +35,34 @@ export default function Home() {
   const stat1 = useCountUp("6");
   const stat2 = useCountUp("100");
   const stat3 = useCountUp("666888", 2000);
+  const statHLUSD = useReveal(240);
 
   return (
     <main className="min-h-screen bg-black">
+      {!showLanding && <EmulatorEntry onTransitionComplete={() => setShowLanding(true)} />}
+      
       <TopNavBar />
 
       {/* ============================================================
           HERO SECTION
           ============================================================ */}
       <section className="relative min-h-screen flex flex-col items-center justify-center border-b border-white/12 pt-24 overflow-hidden">
-        {/* Parallax floating blurs */}
+        {/* 3D Premium Card Background - Only render after transition to prevent WebGL context competition */}
+        {showLanding && <PremiumCardHero />}
+
+        {/* Parallax floating blurs & Spheres */}
         <div ref={heroBgRef} className="absolute inset-0 pointer-events-none">
           <div className="absolute top-20 left-1/4 w-[500px] h-[500px] bg-white/[0.04] rounded-full blur-[100px] pulse-glow"></div>
           <div className="absolute bottom-20 right-1/4 w-[400px] h-[400px] bg-white/[0.04] rounded-full blur-[80px] pulse-glow" style={{ animationDelay: '2s' }}></div>
+          
+          {/* Cinematic Spheres Asset */}
+          <div className="absolute inset-0 z-0 opacity-40 mix-blend-screen overflow-hidden">
+            <img 
+              src="/hero-spheres.png" 
+              alt="" 
+              className="w-full h-full object-cover scale-110"
+            />
+          </div>
         </div>
 
         {/* Corner brackets */}
@@ -256,13 +277,13 @@ export default function Home() {
       {/* ============================================================
           STATS — scale + count-up numbers
           ============================================================ */}
-      <section ref={statsReveal} className="bg-white text-black py-20 px-8 border-b border-white/12 relative overflow-hidden">
+      <section ref={statsReveal} className="bg-white text-black py-20 px-8 border-b border-black/12 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-r from-black/5 to-transparent pointer-events-none"></div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-12 md:gap-0 relative z-10">
           {[
             { ref: stat1, number: "6", suffix: "", label: "Agent Types" },
             { ref: stat2, number: "100", suffix: "%", label: "On-Chain" },
-            { ref: null, number: "HLUSD", suffix: "", label: "Stable Gas" },
+            { ref: statHLUSD, number: "HLUSD", suffix: "", label: "Stable Gas" },
             { ref: stat3, number: "666888", suffix: "", label: "Chain ID" },
           ].map((stat, idx) => (
             <div key={idx} data-item className={`flex flex-col items-center md:items-start ${idx < 3 ? "md:border-r" : ""} border-black/10 px-8 group hover:opacity-60 transition-opacity duration-300`}>

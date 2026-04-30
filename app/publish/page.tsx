@@ -155,6 +155,8 @@ function parseSchemaForDeploy(schemaRaw: string): { fields: GeneratedField[] } {
   return { fields };
 }
 
+import { useReveal, useStaggerReveal } from "@/hooks/useScrollAnimation";
+
 export default function PublishPage() {
   const [publishMode, setPublishMode] = useState<PublishMode>("guided");
   const [generationPrompt, setGenerationPrompt] = useState("");
@@ -180,6 +182,10 @@ export default function PublishPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastTxHash, setLastTxHash] = useState<string | null>(null);
   const [reviewResult, setReviewResult] = useState<PublishReviewResult | null>(null);
+
+  // Reveal animations
+  const headerRef = useReveal(0);
+  const formRef = useReveal(150);
 
   const explorerBase = useMemo(
     () => (process.env.NEXT_PUBLIC_HELA_RPC ? "https://testnet-blockexplorer.helachain.com/tx/" : null),
@@ -468,7 +474,7 @@ export default function PublishPage() {
     <main className="min-h-screen bg-black">
       <TopNavBar />
 
-      <header className="mt-24 border-b border-white/10 px-8 pb-8 pt-16">
+      <header ref={headerRef} className="mt-24 border-b border-white/10 px-8 pb-8 pt-16 reveal-up">
         <div className="mb-4 flex items-center gap-4">
           <span className="bracket-link cursor-pointer font-mono text-sm text-white">PUBLISH</span>
           <span className="select-none font-mono text-sm text-white/20">░░░░░░░░░░░░░░</span>
@@ -476,7 +482,7 @@ export default function PublishPage() {
         <h1 className="font-headline text-[120px] leading-none tracking-tight text-white">PUBLISH</h1>
       </header>
 
-      <div className="mx-auto max-w-2xl p-8 py-16">
+      <div ref={formRef} className="mx-auto max-w-2xl p-8 py-16 reveal-blur">
         <div className="flex flex-col gap-8 border border-white/12 p-8">
           <div>
             <h2 className="mb-2 font-headline text-4xl uppercase text-white">Publish Your Agent</h2>

@@ -10,7 +10,8 @@ import {
   activateAgent as activateAgentOnChain,
   fetchNativeBalanceForAddress,
   getPublicContractAddresses,
-  isAgentActivatedByUser
+  isAgentActivatedByUser,
+  updateAgentTransaction
 } from "@/lib/contracts";
 import { calculateDeveloperPayout, calculatePlatformFee, PLATFORM_FEE_PERCENT } from "@/lib/platformFee";
 import {
@@ -758,6 +759,10 @@ export default function AgentDetailPage() {
   const [agentLoadError, setAgentLoadError] = useState<string | null>(null);
   const [automationState, setAutomationState] = useState<AutomationAgentState | null>(null);
   const [automationError, setAutomationError] = useState<string | null>(null);
+  const [isCreator, setIsCreator] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState({ name: "", description: "", price: "" });
+  const [isUpdatingAgent, setIsUpdatingAgent] = useState(false);
   const [automationStatus, setAutomationStatus] = useState<string | null>(null);
   const [isCreatingJob, setIsCreatingJob] = useState(false);
   const [automationFrequency, setAutomationFrequency] = useState<AutomationFrequency>("daily");
@@ -828,6 +833,7 @@ export default function AgentDetailPage() {
             typeof nextAutomationState?.storedAgent?.developerAddress === "string" &&
             nextAutomationState.storedAgent.developerAddress.toLowerCase() === currentAccount.toLowerCase();
 
+          setIsCreator(creatorByChain || creatorByStoredMetadata);
           nextOwnedState = activatedByWallet || creatorByChain || creatorByStoredMetadata;
         }
 
@@ -874,6 +880,13 @@ export default function AgentDetailPage() {
                 fundingHint: nextExistingJob?.fundingHint || undefined
               }
             );
+          }
+          if (agentData.agent) {
+            setEditForm({
+              name: agentData.agent.name || "",
+              description: agentData.agent.description || "",
+              price: agentData.agent.price ? String(agentData.agent.price) : ""
+            });
           }
         }
       } catch (error: unknown) {
@@ -1326,6 +1339,32 @@ export default function AgentDetailPage() {
     }
   };
 
+  const handleUpdateAgent = async () => {
+    try {
+      setIsUpdatingAgent(true);
+      setAutomationError(null);
+      setAutomationStatus("Updating agent on-chain...");
+
+      await ensureHeLaNetwork();
+      await connectWallet();
+
+      await updateAgentTransaction(agentId, {
+        name: editForm.name,
+        description: editForm.description,
+        price: editForm.price,
+      });
+
+      setAutomationStatus("Agent updated successfully!");
+      setIsEditing(false);
+      window.location.reload();
+    } catch (error: unknown) {
+      setAutomationError(error instanceof Error ? error.message : "Failed to update agent.");
+      setAutomationStatus(null);
+    } finally {
+      setIsUpdatingAgent(false);
+    }
+  };
+
   if (!agent && isAgentLoading) {
     return (
       <main className="min-h-screen bg-black">
@@ -1453,9 +1492,70 @@ export default function AgentDetailPage() {
         </div>
 
         <div className="flex flex-col gap-6 lg:col-span-2">
-          <div>
-            <h1 className="mb-4 font-headline text-6xl uppercase text-white">{agent.name}</h1>
-            <p className="text-sm uppercase leading-relaxed text-white/60">{agent.fullDescription}</p>
+          <div className="flex flex-col gap-4">
+            <div className="flex items-start justify-between">
+              {isEditing ? (
+                <div className="w-full flex flex-col gap-4">
+                  <input
+                    type="text"
+                    value={editForm.name}
+                    onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                    className="w-full border-b border-white/20 bg-transparent py-2 font-headline text-4xl uppercase text-white outline-none focus:border-white"
+                    placeholder="AGENT NAME"
+                  />
+                  <textarea
+                    value={editForm.description}
+                    onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                    className="w-full border border-white/20 bg-white/5 p-4 font-mono text-sm uppercase text-white outline-none focus:border-white min-h-[100px]"
+                    placeholder="AGENT DESCRIPTION"
+                  />
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1">
+                      <p className="mb-2 font-mono text-xs uppercase text-white/50">Price (HLUSD)</p>
+                      <input
+                        type="number"
+                        value={editForm.price}
+                        onChange={(e) => setEditForm({ ...editForm, price: e.target.value })}
+                        className="w-full border border-white/20 bg-white/5 p-3 font-mono text-sm uppercase text-white outline-none focus:border-white"
+                        placeholder="0.0"
+                        min="0"
+                        step="0.1"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 mt-2">
+                    <button
+                      onClick={handleUpdateAgent}
+                      disabled={isUpdatingAgent}
+                      className="bg-white px-6 py-2 font-mono text-xs font-bold uppercase text-black transition-colors hover:bg-white/90 disabled:opacity-50"
+                    >
+                      {isUpdatingAgent ? "SAVING..." : "SAVE CHANGES"}
+                    </button>
+                    <button
+                      onClick={() => setIsEditing(false)}
+                      disabled={isUpdatingAgent}
+                      className="border border-white/20 px-6 py-2 font-mono text-xs font-bold uppercase text-white transition-colors hover:bg-white/10"
+                    >
+                      CANCEL
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex-1">
+                  <h1 className="mb-4 font-headline text-6xl uppercase text-white">{agent.name}</h1>
+                  <p className="text-sm uppercase leading-relaxed text-white/60">{agent.fullDescription}</p>
+                </div>
+              )}
+
+              {isCreator && !isEditing && (
+                <button
+                  onClick={() => setIsEditing(true)}
+                  className="ml-4 flex-shrink-0 border border-white/20 px-4 py-2 font-mono text-xs uppercase text-white transition-colors hover:bg-white/5"
+                >
+                  EDIT AGENT
+                </button>
+              )}
+            </div>
             {agentLoadError && (
               <div className="mt-4 border border-yellow-500/60 bg-yellow-500/10 p-3">
                 <p className="font-mono text-xs uppercase text-yellow-100">

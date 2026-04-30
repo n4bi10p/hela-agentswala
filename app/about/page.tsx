@@ -97,8 +97,7 @@ export default function AboutPage() {
                 { name: "Aman", role: "Frontend Engineering", specialty: "Coding", linkedin: "https://www.linkedin.com/in/aman-choudhary-01a836329/", github: "https://github.com/Aman0choudhary" },
                 { name: "Nabil", role: "Smart Contracts + Blockchain", specialty: "Lead", linkedin: "https://www.linkedin.com/in/n4bi10p/", github: "https://github.com/n4bi10p" },
                 { name: "Bhoomi", role: "AI Agent Execution Engine", specialty: "Core Execution", linkedin: "https://www.linkedin.com/in/bhoomi-awhad/", github: "https://github.com/Bhoomi-112" },
-                { name: "Madhura", role: "Frontend Design & UX", specialty: "Design", linkedin: "https://www.linkedin.com/in/madhura-kene-a471503b4?utm_source=share_via_utm_content=profile_utm_medium=member_android", github: "https://github.com/Madhura-kene" },
-                { name: "Saad", role: "Research, Testing & Content", specialty: "QA & Research", linkedin: "https://www.linkedin.com/in/saad-junedi-503470331", github: "https://github.com/Saadjunedi07" }
+                { name: "Madhura", role: "Frontend Design & UX", specialty: "Design", linkedin: "https://www.linkedin.com/in/madhura-kene-a471503b4?utm_source=share_via_utm_content=profile_utm_medium=member_android", github: "https://github.com/Madhura-kene" }
               ].map((member, idx) => (
                 <div key={idx} data-item className="border border-white/20 p-6 hover:border-white/60 transition-all duration-500 group hover:bg-white/[0.04]">
                   <h3 className="font-headline text-2xl font-bold mb-2">{member.name}</h3>
