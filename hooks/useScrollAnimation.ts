@@ -51,36 +51,55 @@ export function useStaggerReveal(staggerMs: number = 120) {
     const el = ref.current;
     if (!el) return;
 
+    const applyReveal = () => {
+      const items = el.querySelectorAll('[data-item]');
+      items.forEach((item, i) => {
+        const htmlItem = item as HTMLElement;
+        htmlItem.style.transitionDelay = `${i * staggerMs}ms`;
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            htmlItem.classList.add('item-visible');
+          });
+        });
+      });
+    };
+
+    const resetReveal = () => {
+      const items = el.querySelectorAll('[data-item]');
+      items.forEach((item) => {
+        const htmlItem = item as HTMLElement;
+        htmlItem.classList.remove('item-visible');
+        htmlItem.style.transitionDelay = '0ms';
+      });
+    };
+
     const observer = new IntersectionObserver(
       ([entry]) => {
-        const items = el.querySelectorAll('[data-item]');
-
         if (entry.isIntersecting) {
           el.classList.add('in-view');
-          items.forEach((item, i) => {
-            const htmlItem = item as HTMLElement;
-            htmlItem.style.transitionDelay = `${i * staggerMs}ms`;
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                htmlItem.classList.add('item-visible');
-              });
-            });
-          });
+          applyReveal();
         } else {
           // RESET everything when out of view — loop!
           el.classList.remove('in-view');
-          items.forEach((item) => {
-            const htmlItem = item as HTMLElement;
-            htmlItem.classList.remove('item-visible');
-            htmlItem.style.transitionDelay = '0ms';
-          });
+          resetReveal();
         }
       },
       { threshold: 0.05, rootMargin: '0px 0px -30px 0px' }
     );
 
+    // Re-apply reveal when children are added while already in view.
+    const mutationObserver = new MutationObserver(() => {
+      if (el.classList.contains('in-view')) {
+        applyReveal();
+      }
+    });
+
+    mutationObserver.observe(el, { childList: true, subtree: true });
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      mutationObserver.disconnect();
+    };
   }, [staggerMs]);
 
   return ref;

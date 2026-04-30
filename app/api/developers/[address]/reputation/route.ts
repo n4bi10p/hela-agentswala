@@ -8,9 +8,10 @@ export const revalidate = 0;
 
 export async function GET(
   _req: Request,
-  { params }: { params: { address: string } }
+  { params }: { params: Promise<{ address: string }> }
 ) {
-  const developerAddress = params.address?.trim().toLowerCase();
+  const { address } = await params;
+  const developerAddress = address?.trim().toLowerCase();
 
   if (!developerAddress) {
     return NextResponse.json({ error: "Developer address is required" }, { status: 400 });

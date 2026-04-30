@@ -13,9 +13,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type RouteParams = {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 };
 
 function parseAgentId(raw: string): number | null {
@@ -41,7 +41,8 @@ function toPrice(priceWei: bigint): number {
 }
 
 export async function GET(_request: Request, { params }: RouteParams) {
-  const parsedId = parseAgentId(params.id);
+  const { id } = await params;
+  const parsedId = parseAgentId(id);
   if (parsedId === null) {
     return NextResponse.json({ error: "Invalid agent id." }, { status: 400 });
   }

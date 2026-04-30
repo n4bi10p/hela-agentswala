@@ -19,9 +19,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type RouteParams = {
-  params: {
+  params: Promise<{
     address: string;
-  };
+  }>;
 };
 
 type ActivityItem = {
@@ -69,7 +69,8 @@ function shortenResult(value: string): string {
 }
 
 export async function GET(_request: Request, { params }: RouteParams) {
-  const address = params.address.trim();
+  const { address: rawAddress } = await params;
+  const address = rawAddress.trim();
   if (!isAddress(address)) {
     return NextResponse.json({ error: "Invalid wallet address." }, { status: 400 });
   }

@@ -23,7 +23,13 @@ export function DeveloperRepBadge({ developerAddress, compact = false }: Develop
       cache: "no-store"
     })
       .then((r) => r.json())
-      .then((data: DeveloperReputation) => setRep(data))
+      .then((data: any) => {
+        if (data && typeof data.averageStars === "number") {
+          setRep(data as DeveloperReputation);
+        } else {
+          setRep(null);
+        }
+      })
       .catch(() => null);
   }, [developerAddress]);
 

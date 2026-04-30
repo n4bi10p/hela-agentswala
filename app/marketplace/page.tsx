@@ -272,7 +272,7 @@ export default function MarketplacePage() {
       ) : (
         <div ref={agentGridStagger} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-8">
           {filteredAgents.map((agent) => (
-            <div key={agent.id} data-item>
+            <div key={agent.id} data-item className={!isLoading ? "item-visible" : undefined}>
               <AgentCard
                 {...agent}
                 isOwnedByCurrentUser={
