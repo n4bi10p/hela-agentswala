@@ -232,6 +232,8 @@ function normalizeAgentId(value: string | number): number | null {
   return parsed;
 }
 
+import { useReveal, useStaggerReveal } from "@/hooks/useScrollAnimation";
+
 export default function DashboardPage() {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [walletHlusdBalance, setWalletHlusdBalance] = useState<string | null>(null);
@@ -250,6 +252,13 @@ export default function DashboardPage() {
   const [hlusdFundingAmounts, setHlusdFundingAmounts] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Reveal animations
+  const headerRef = useReveal(0);
+  const walletRef = useReveal(100);
+  const statsStagger = useStaggerReveal(80);
+  const jobsRef = useReveal(150);
+  const activityRef = useReveal(200);
 
   const totalAgentCount = useMemo(() => {
     const uniqueIds = new Set<number>();
@@ -559,8 +568,8 @@ export default function DashboardPage() {
     <main className="min-h-screen bg-black">
       <TopNavBar />
 
-      <header className="mt-24 border-b border-white/10 px-8 pb-8 pt-16">
-        <div className="mb-4 flex items-center gap-4">
+      <header ref={headerRef} className="mt-24 border-b border-white/10 px-8 pb-8 pt-16 reveal-up">
+        <div className="flex items-center gap-4 mb-4">
           <span className="cursor-pointer font-mono text-sm text-white bracket-link">DASHBOARD</span>
           <span className="select-none font-mono text-sm text-white/20">░░░░░░░░░░░░░░</span>
         </div>
@@ -605,7 +614,7 @@ export default function DashboardPage() {
         )}
 
         {walletAddress && (
-          <div className="mb-8 flex flex-col gap-4 border border-white/12 p-4 md:flex-row md:items-start md:justify-between">
+          <div ref={walletRef} className="mb-8 flex flex-col gap-4 border border-white/12 p-4 md:flex-row md:items-start md:justify-between reveal-blur">
             <div className="flex-1">
               <p className="font-mono text-xs uppercase text-white/60">Connected Wallet</p>
               <p className="break-all font-mono text-sm text-white">{walletAddress}</p>
@@ -644,26 +653,26 @@ export default function DashboardPage() {
           </div>
         )}
 
-        <div className="mb-12 grid grid-cols-1 gap-6 md:grid-cols-4">
-          <div className="flex flex-col gap-2 border border-white/12 p-6">
+        <div ref={statsStagger} className="mb-12 grid grid-cols-1 gap-6 md:grid-cols-4">
+          <div data-item className="flex flex-col gap-2 border border-white/12 p-6">
             <p className="font-mono text-xs uppercase text-white/60">Active Agents</p>
             <p className="font-headline text-6xl text-white">{totalAgentCount}</p>
           </div>
-          <div className="flex flex-col gap-2 border border-white/12 p-6">
+          <div data-item className="flex flex-col gap-2 border border-white/12 p-6">
             <p className="font-mono text-xs uppercase text-white/60">Total Executions</p>
             <p className="font-headline text-6xl text-white">{totalExecutions}</p>
           </div>
-          <div className="flex flex-col gap-2 border border-white/12 p-6">
+          <div data-item className="flex flex-col gap-2 border border-white/12 p-6">
             <p className="font-mono text-xs uppercase text-white/60">Running Agents</p>
             <p className="font-headline text-6xl text-white">{runningAgentsCount}</p>
           </div>
-          <div className="flex flex-col gap-2 border border-white/12 p-6">
+          <div data-item className="flex flex-col gap-2 border border-white/12 p-6">
             <p className="font-mono text-xs uppercase text-white/60">Automation Jobs</p>
             <p className="font-headline text-6xl text-white">{automationJobs.length}</p>
           </div>
         </div>
 
-        <div className="mb-12">
+        <div ref={jobsRef} className="mb-12 reveal-up">
           <h2 className="mb-6 font-headline text-4xl uppercase text-white">Automation Jobs</h2>
 
           {automationJobs.length === 0 ? (
@@ -1024,7 +1033,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        <div>
+        <div ref={activityRef} className="reveal-blur">
           <h2 className="mb-6 font-headline text-4xl uppercase text-white">Activity Feed</h2>
 
           {combinedFeed.length === 0 ? (
