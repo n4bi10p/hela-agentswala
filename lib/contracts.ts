@@ -192,7 +192,7 @@ export async function publishAgent(input: {
 }
 
 export async function updateAgentTransaction(
-  agentId: number,
+  agentId: number | string,
   input: {
     name: string;
     description: string;
@@ -202,10 +202,11 @@ export async function updateAgentTransaction(
   try {
     const registry = await getRegistryContract(true);
     const tx = await registry.updateAgent(
-      agentId,
+      BigInt(agentId),
       input.name,
       input.description,
-      parseUnits(input.price, 18)
+      parseUnits(input.price, 18),
+      { type: 0 }
     );
     const receipt = await tx.wait();
     return toTxResult(receipt);

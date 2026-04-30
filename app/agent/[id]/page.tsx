@@ -1335,7 +1335,7 @@ export default function AgentDetailPage() {
       await ensureHeLaNetwork();
       await connectWallet();
 
-      await updateAgentTransaction(Number(agentId), {
+      await updateAgentTransaction(agentId, {
         name: editForm.name,
         description: editForm.description,
         price: editForm.price,
