@@ -172,7 +172,7 @@ export async function approveHLUSD(spender: string, amount: bigint) {
     const signer = await provider.getSigner();
     const contract = new Contract(token, ERC20_ABI, signer);
 
-    const tx = await contract.approve(spender, amount);
+    const tx = await contract.approve(spender, amount, { type: 0 });
     return tx.wait();
   } catch (error) {
     throw normalizeChainError(error, "Failed to approve HLUSD");
@@ -196,7 +196,7 @@ export async function transferHLUSD(recipient: string, amount: string) {
     const contract = new Contract(token, ERC20_ABI, signer);
 
     const decimals = await contract.decimals();
-    const tx = await contract.transfer(recipient, parseUnits(amount, Number(decimals)));
+    const tx = await contract.transfer(recipient, parseUnits(amount, Number(decimals)), { type: 0 });
     return tx.wait();
   } catch (error) {
     throw normalizeChainError(error, "Failed to transfer HLUSD");
