@@ -60,7 +60,8 @@ const AGENTS: Record<
       { field: "Price Threshold", type: "number", placeholder: "e.g., 0.98" },
       { field: "Current Price", type: "number", placeholder: "e.g., 0.95" },
       { field: "Action Type", type: "select", placeholder: "Alert or Execute" },
-      { field: "Amount", type: "number", placeholder: "HLUSD amount" }
+      { field: "Amount", type: "number", placeholder: "HLUSD amount" },
+      { field: "whatsappNumber", type: "text", placeholder: "+1234567890" }
     ]
   },
   "2": {
@@ -79,7 +80,8 @@ const AGENTS: Record<
     config: [
       { field: "LP Token Address", type: "text", placeholder: "0x..." },
       { field: "Current APY", type: "number", placeholder: "e.g., 12.5" },
-      { field: "Threshold", type: "number", placeholder: "Min yield to compound %" }
+      { field: "Threshold", type: "number", placeholder: "Min yield to compound %" },
+      { field: "whatsappNumber", type: "text", placeholder: "+1234567890" }
     ]
   },
   "3": {
@@ -99,7 +101,8 @@ const AGENTS: Record<
       { field: "Sample Message", type: "textarea", placeholder: "Paste a sample incoming message..." },
       { field: "Tone", type: "select", placeholder: "Professional/Casual/Aggressive" },
       { field: "Brand Context", type: "textarea", placeholder: "Describe your brand..." },
-      { field: "Language", type: "select", placeholder: "English/Other" }
+      { field: "Language", type: "select", placeholder: "English/Other" },
+      { field: "whatsappNumber", type: "text", placeholder: "+1234567890" }
     ]
   },
   "4": {
@@ -117,7 +120,8 @@ const AGENTS: Record<
     config: [
       { field: "Min Profit Threshold %", type: "number", placeholder: "0.5" },
       { field: "DEX Whitelist", type: "text", placeholder: "Comma-separated DEX names" },
-      { field: "Max Gas Price", type: "number", placeholder: "HLUSD" }
+      { field: "Max Gas Price", type: "number", placeholder: "HLUSD" },
+      { field: "whatsappNumber", type: "text", placeholder: "+1234567890" }
     ]
   },
   "5": {
@@ -137,7 +141,8 @@ const AGENTS: Record<
       { field: "Recipient Address", type: "text", placeholder: "0x..." },
       { field: "Amount (HLUSD)", type: "number", placeholder: "100" },
       { field: "Frequency", type: "select", placeholder: "Daily/Weekly/Monthly" },
-      { field: "Start Date", type: "date", placeholder: "YYYY-MM-DD" }
+      { field: "Start Date", type: "date", placeholder: "YYYY-MM-DD" },
+      { field: "whatsappNumber", type: "text", placeholder: "+1234567890" }
     ]
   },
   "6": {
@@ -157,7 +162,8 @@ const AGENTS: Record<
       { field: "Target Allocation", type: "text", placeholder: "HLUSD:60%, ETH:30%, OTHER:10%" },
       { field: "Current Allocation", type: "text", placeholder: "Optional: HLUSD:55%, ETH:35%, OTHER:10%" },
       { field: "Drift Tolerance %", type: "number", placeholder: "5" },
-      { field: "Tokens to Monitor", type: "text", placeholder: "HLUSD,ETH,BTC" }
+      { field: "Tokens to Monitor", type: "text", placeholder: "HLUSD,ETH,BTC" },
+      { field: "whatsappNumber", type: "text", placeholder: "+1234567890" }
     ]
   },
   "7": {
@@ -177,7 +183,8 @@ const AGENTS: Record<
       { field: "Business Type", type: "text", placeholder: "e.g., SaaS, Agency, Retail" },
       { field: "Industry Context", type: "textarea", placeholder: "Describe your industry..." },
       { field: "Response Language", type: "select", placeholder: "English/Other" },
-      { field: "Formality", type: "select", placeholder: "formal/informal" }
+      { field: "Formality", type: "select", placeholder: "formal/informal" },
+      { field: "whatsappNumber", type: "text", placeholder: "+1234567890" }
     ]
   }
 };
@@ -599,7 +606,8 @@ function buildActivationRequest(agentType: string, agentId: string, formData: Re
         currentPrice,
         direction,
         action,
-        amount
+        amount,
+        whatsappNumber: readFirstField(formData, ["whatsappNumber", "WhatsApp Number (Notifications)"]) || undefined
       }
     };
   }
@@ -623,7 +631,8 @@ function buildActivationRequest(agentType: string, agentId: string, formData: Re
         poolType: lpAddress,
         amount: compoundThreshold,
         durationDays: 30,
-        riskLevel
+        riskLevel,
+        whatsappNumber: readFirstField(formData, ["whatsappNumber", "WhatsApp Number (Notifications)"]) || undefined
       }
     };
   }
@@ -635,7 +644,8 @@ function buildActivationRequest(agentType: string, agentId: string, formData: Re
         message: readFirstField(formData, ["Sample Message", "message", "topic", "prompt"]) ||
           "Thanks for your message. Can we continue this conversation?",
         tone: (readFirstField(formData, ["Tone", "tone"]) || "professional").toLowerCase(),
-        brandContext: readFirstField(formData, ["Brand Context", "brandContext", "persona"]) || "General brand context"
+        brandContext: readFirstField(formData, ["Brand Context", "brandContext", "persona"]) || "General brand context",
+        whatsappNumber: readFirstField(formData, ["whatsappNumber", "WhatsApp Number (Notifications)"]) || undefined
       }
     };
   }
@@ -661,7 +671,8 @@ function buildActivationRequest(agentType: string, agentId: string, formData: Re
         ),
         amount,
         frequency,
-        startDate: normalizeDateToIso(startDate || new Date().toISOString())
+        startDate: normalizeDateToIso(startDate || new Date().toISOString()),
+        whatsappNumber: readFirstField(formData, ["whatsappNumber", "WhatsApp Number (Notifications)"]) || undefined
       }
     };
   }
@@ -683,7 +694,8 @@ function buildActivationRequest(agentType: string, agentId: string, formData: Re
       payload: {
         targetAllocations,
         currentAllocations,
-        driftTolerance: parseNumberFromAliases(formData, ["Drift Tolerance %", "driftTolerance"], 5)
+        driftTolerance: parseNumberFromAliases(formData, ["Drift Tolerance %", "driftTolerance"], 5),
+        whatsappNumber: readFirstField(formData, ["whatsappNumber", "WhatsApp Number (Notifications)"]) || undefined
       }
     };
   }
@@ -697,7 +709,8 @@ function buildActivationRequest(agentType: string, agentId: string, formData: Re
           `Give three practical growth actions for a ${businessType} business.`,
         businessContext: readFirstField(formData, ["Industry Context", "businessContext"]) || businessType,
         language: readFirstField(formData, ["Response Language", "language"]) || "English",
-        formality: (readFirstField(formData, ["Formality", "formality"]) || "formal").toLowerCase()
+        formality: (readFirstField(formData, ["Formality", "formality"]) || "formal").toLowerCase(),
+        whatsappNumber: readFirstField(formData, ["whatsappNumber", "WhatsApp Number (Notifications)"]) || undefined
       }
     };
   }

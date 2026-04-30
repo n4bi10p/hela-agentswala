@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { callGemini } from "@/lib/gemini";
+import { sendWhatsAppMessage } from "@/lib/whatsapp";
 
 type ContentConfig = {
   platform: string;
@@ -9,6 +10,7 @@ type ContentConfig = {
   cta: string;
   audience: string;
   characterLimit: number | null;
+  whatsappNumber: string | null;
 };
 
 type ContentResponse = {
@@ -68,7 +70,8 @@ function parseBody(body: unknown): ContentConfig {
     style,
     cta,
     audience,
-    characterLimit
+    characterLimit,
+    whatsappNumber: asString(source.whatsappNumber) || null
   };
 }
 
@@ -198,6 +201,13 @@ export async function POST(req: Request) {
         generatedAt: new Date().toISOString()
       }
     };
+
+    if (config.whatsappNumber) {
+      await sendWhatsAppMessage(
+        config.whatsappNumber,
+        `Content Agent Generated Ideas:\n\n1. ${ideas[0]}\n2. ${ideas[1]}\n3. ${ideas[2]}`
+      );
+    }
 
     return NextResponse.json(response, { status: 200 });
   } catch (error: unknown) {

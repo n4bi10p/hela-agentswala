@@ -205,6 +205,12 @@ export function parseConfigSchema(rawSchema: string): ConfigField[] {
         .filter((field): field is ConfigField => field !== null);
 
       if (fields.length) {
+        fields.push({
+          key: "whatsappNumber",
+          label: "WhatsApp Number (Notifications)",
+          inputType: "text",
+          placeholder: "+1234567890"
+        });
         return fields;
       }
     }
@@ -225,6 +231,12 @@ export function parseConfigSchema(rawSchema: string): ConfigField[] {
       });
 
       if (fields.length) {
+        fields.push({
+          key: "whatsappNumber",
+          label: "WhatsApp Number (Notifications)",
+          inputType: "text",
+          placeholder: "+1234567890"
+        });
         return fields;
       }
     }
@@ -238,6 +250,12 @@ export function parseConfigSchema(rawSchema: string): ConfigField[] {
       label: "Configuration",
       inputType: "textarea",
       placeholder: "Paste configuration JSON"
+    },
+    {
+      key: "whatsappNumber",
+      label: "WhatsApp Number (Notifications)",
+      inputType: "text",
+      placeholder: "+1234567890"
     }
   ];
 }

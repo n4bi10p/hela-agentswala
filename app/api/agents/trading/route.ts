@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { scheduleAgent } from "@/lib/cronManager";
 import { callGemini } from "@/lib/gemini";
 import { getTokenPrice } from "@/lib/priceService";
+import { sendWhatsAppMessage } from "@/lib/whatsapp";
 
 type Direction = "above" | "below";
 type ExecutionAction = "alert" | "simulate-swap";
@@ -16,9 +17,11 @@ type TradingConfig = {
   action: ExecutionAction;
   amount: number;
   userAddress: string;
+  userAddress: string;
   enableMonitoring: boolean;
   monitorFrequency: MonitorFrequency;
   currentPriceFallback: number | null;
+  whatsappNumber: string | null;
 };
 
 type RequestBody = {
@@ -258,9 +261,9 @@ function parseBody(body: unknown): TradingConfig {
     action,
     amount,
     userAddress,
-    enableMonitoring,
     monitorFrequency,
-    currentPriceFallback
+    currentPriceFallback,
+    whatsappNumber: asString(source.whatsappNumber) || null
   };
 }
 
@@ -400,6 +403,13 @@ export async function POST(req: Request) {
       checkedAt,
       monitorJobId
     };
+
+    if (config.whatsappNumber) {
+      await sendWhatsAppMessage(
+        config.whatsappNumber,
+        `Trading Agent Update:\n\n${analysis}\n\nPrice Diff: ${priceDiff}%\nTriggered: ${triggered}`
+      );
+    }
 
     return NextResponse.json(response, { status: 200 });
   } catch (error: unknown) {

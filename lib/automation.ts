@@ -9,6 +9,7 @@ import { isTemplateAutomationPlaceholder } from "./automationBootstrap";
 import { executeFarmingDeposit, isRealFarmingExecutionEnabled } from "./farmingExecutor";
 import { executeTokenSwap, executeTradingSwap, isRealTradingExecutionEnabled } from "./tradingExecutor";
 import type { AgentJob, AutomationFrequency, ExecutionPolicy, ExecutionResult } from "../types/agent";
+import { sendWhatsAppMessage } from "./whatsapp";
 
 const ERC20_ABI = [
   "function transfer(address to, uint256 amount) returns (bool)",
@@ -244,18 +245,31 @@ function getRebalancingExecutionBudget(job: AgentJob, mostOverweightDeviation: n
 }
 
 async function executeContentAutomation(job: AgentJob): Promise<ExecutionResult> {
+  const policy = getExecutionPolicy(job);
   const topic = readText(job.userConfig, ["topic", "prompt", "message", "Sample Message"], "integration update");
   const tone = readText(job.userConfig, ["tone", "Tone"], "professional");
   const brandContext = readText(job.userConfig, ["brandContext", "Brand Context"], "general brand context");
 
-  const result = await callGemini(
+  const generatedContent = await callGemini(
     `Write one concise social response idea about "${topic}" in a ${tone} tone. Brand context: ${brandContext}.`,
     "Return one short practical reply with no markdown."
   ).catch(() => `Prepared a ${tone} content response for: ${topic}`);
 
+  const isApproved = policy.autoExecute; // Or if we add a UI way to inject approvedDraft: job.userConfig.approvedDraft === generatedContent
+  
+  const resultMessage = isApproved 
+    ? `PUBLISHED: ${generatedContent}`
+    : `DRAFT REQUIRES APPROVAL: ${generatedContent}\n\n(Please go to the dashboard to approve this content).`;
+
   return {
     success: true,
-    result,
+    result: resultMessage,
+    data: {
+      topic,
+      tone,
+      draft: generatedContent,
+      executionMode: isApproved ? "published" : "alert-only"
+    },
     executedAt: new Date().toISOString()
   };
 }
@@ -644,6 +658,13 @@ async function processJobWithOptions(job: AgentJob, options: ProcessJobOptions =
       executedAt: result.executedAt
     });
 
+    if (job.userConfig?.whatsappNumber) {
+      await sendWhatsAppMessage(
+        String(job.userConfig.whatsappNumber),
+        `Agent Execution Success:\n\n${result.result}`
+      );
+    }
+
     return {
       jobId: job.id,
       success: true,
@@ -667,6 +688,13 @@ async function processJobWithOptions(job: AgentJob, options: ProcessJobOptions =
       result: message,
       executedAt: startedAt.toISOString()
     });
+
+    if (job.userConfig?.whatsappNumber) {
+      await sendWhatsAppMessage(
+        String(job.userConfig.whatsappNumber),
+        `Agent Execution Failed:\n\n${message}`
+      );
+    }
 
     return {
       jobId: job.id,
