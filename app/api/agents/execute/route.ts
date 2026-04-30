@@ -8,6 +8,7 @@ import { NextResponse } from "next/server";
 import { ethers } from "ethers";
 import { getExecutorContract } from "../../../../lib/contracts";
 import { getAgent, runAgent } from "../../../../lib/agentRunner";
+import { sendWhatsAppMessage } from "../../../../lib/whatsapp";
 
 type ExecuteRequestBody = {
   agentId?: string;
@@ -106,6 +107,13 @@ export async function POST(req: Request) {
       console.log("[EXECUTE] On-chain execution log complete", txHash);
     } catch (logError: unknown) {
       console.warn("[EXECUTE] Non-blocking on-chain log failed:", errorMessage(logError));
+    }
+
+    if (userConfig?.whatsappNumber) {
+      await sendWhatsAppMessage(
+        String(userConfig.whatsappNumber),
+        `Agent Execution ${execution.success ? 'Success' : 'Failed'}:\n\n${execution.result}`
+      );
     }
 
     return NextResponse.json(

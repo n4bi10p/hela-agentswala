@@ -859,6 +859,53 @@ export default function AgentRunPage() {
     }
   };
 
+  const handleSendToWhatsApp = async () => {
+    if (!inputValue.trim() || isLoading) {
+      return;
+    }
+
+    const storedConfig = getStoredAgentConfig(agentId);
+    let phoneNumber = storedConfig["whatsappNumber"] || storedConfig["WhatsApp Number (Notifications)"];
+    
+    if (!phoneNumber) {
+      phoneNumber = window.prompt("Please enter your WhatsApp number (with country code, e.g. 919876543210):") || "";
+      if (!phoneNumber) return;
+    }
+
+    const confirmSend = window.confirm(`Send this message directly to WhatsApp (${phoneNumber})?\n\n"${inputValue}"`);
+    if (!confirmSend) return;
+
+    setIsLoading(true);
+    try {
+      const response = await fetch("/api/whatsapp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phoneNumber, message: inputValue })
+      });
+
+      if (!response.ok) throw new Error("Failed to send message via WhatsApp API.");
+
+      const assistantMessage: Message = {
+        id: createMessageId(),
+        type: "assistant",
+        content: `✅ Sent message directly to WhatsApp (${phoneNumber})!`,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, { id: createMessageId(), type: "user", content: inputValue, timestamp: new Date() }, assistantMessage]);
+      setInputValue("");
+    } catch (error: unknown) {
+      const assistantMessage: Message = {
+        id: createMessageId(),
+        type: "assistant",
+        content: `❌ FAILED to send to WhatsApp: ${error instanceof Error ? error.message : "Unknown error"}`,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-black flex flex-col">
       <TopNavBar />
@@ -996,7 +1043,15 @@ export default function AgentRunPage() {
                   disabled={isLoading || !inputValue.trim()}
                   className="flex-1 bg-white text-black py-3 font-headline hover:bg-black hover:text-white border border-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed uppercase"
                 >
-                  {isLoading ? "PROCESSING..." : "[ SEND ↗ ]"}
+                  {isLoading ? "PROCESSING..." : "[ AI SEND ↗ ]"}
+                </button>
+
+                <button
+                  onClick={handleSendToWhatsApp}
+                  disabled={isLoading || !inputValue.trim()}
+                  className="flex-1 bg-[#25D366] text-black py-3 font-headline hover:bg-transparent hover:text-[#25D366] border border-[#25D366] transition-colors disabled:opacity-50 disabled:cursor-not-allowed uppercase"
+                >
+                  [ WHATSAPP ↗ ]
                 </button>
 
                 <Link
