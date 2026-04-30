@@ -47,6 +47,7 @@ export type ExecutionEventRecord = {
 
 const AGENT_REGISTRY_ABI = [
   "function publishAgent(string name,string description,string agentType,uint256 priceHLUSD,string configSchema) returns (uint256)",
+  "function updateAgent(uint256 id,string name,string description,uint256 priceHLUSD)",
   "function getAgent(uint256 id) view returns ((uint256 id,string name,string description,string agentType,uint256 priceHLUSD,address developer,bool isActive,string configSchema))",
   "function getAllAgents() view returns ((uint256 id,string name,string description,string agentType,uint256 priceHLUSD,address developer,bool isActive,string configSchema)[])",
   "function setAgentActive(uint256 id, bool active)"
@@ -187,6 +188,29 @@ export async function publishAgent(input: {
     return toTxResult(receipt);
   } catch (error) {
     throw normalizeChainError(error, "Failed to publish agent");
+  }
+}
+
+export async function updateAgentTransaction(
+  agentId: number,
+  input: {
+    name: string;
+    description: string;
+    price: string;
+  }
+): Promise<TxResult> {
+  try {
+    const registry = await getRegistryContract(true);
+    const tx = await registry.updateAgent(
+      agentId,
+      input.name,
+      input.description,
+      parseUnits(input.price, 18)
+    );
+    const receipt = await tx.wait();
+    return toTxResult(receipt);
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to update agent");
   }
 }
 
