@@ -1,12 +1,16 @@
 import { formatUnits } from "ethers";
 import { NextResponse } from "next/server";
 import { fetchAgentActivationCount, fetchAllAgents } from "@/lib/contracts";
+import { listStoredAgents } from "@/lib/automationStore";
 import {
   getAgentImage,
   isHiddenAgentName,
   normalizeAgentDescription,
   toAgentTypeLabel
 } from "@/lib/agentUi";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 type AgentListItem = {
   id: number;
@@ -68,6 +72,12 @@ function getMarketplacePriority(agent: AgentListItem): number {
 export async function GET() {
   try {
     const agents = await fetchAllAgents();
+    const storedAgents = await listStoredAgents().catch(() => []);
+    const storedDeveloperByAgentId = new Map(
+      storedAgents
+        .filter((entry) => entry.developerAddress && entry.agentId)
+        .map((entry) => [Number(entry.agentId), entry.developerAddress])
+    );
 
     const activeCounts = await Promise.all(
       agents.map(async (agent) => {
@@ -91,7 +101,7 @@ export async function GET() {
         isLive: agent.isActive,
         image: getAgentImage(agent.agentType),
         configSchema: agent.configSchema,
-        developer: agent.developer
+        developer: storedDeveloperByAgentId.get(Number(agent.id)) || agent.developer
       }))
       .filter((agent) => !isHiddenAgentName(agent.name))
       .filter((agent) => !isMarketplaceExcluded(agent));

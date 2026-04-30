@@ -11,6 +11,7 @@ interface AgentCardProps {
   activeCount: number;
   isLive: boolean;
   developer?: string;
+  isOwnedByCurrentUser?: boolean;
 }
 
 function shortenAddress(address?: string): string | null {
@@ -34,7 +35,8 @@ export function AgentCard({
   price,
   activeCount,
   isLive,
-  developer
+  developer,
+  isOwnedByCurrentUser = false
 }: AgentCardProps) {
   const creatorLabel = shortenAddress(developer);
 
@@ -94,7 +96,7 @@ export function AgentCard({
         href={`/agent/${id}`}
         className="w-full border border-white py-3 text-center font-headline text-xl uppercase transition-colors hover:bg-white hover:text-black"
       >
-        [ ACTIVATE ↗ ]
+        {isOwnedByCurrentUser ? "[ OPEN ↗ ]" : "[ ACTIVATE ↗ ]"}
       </Link>
     </div>
   );

@@ -18,6 +18,7 @@
     "deploy:gcp": "bash scripts/deploy-gcp.sh",
     "seed:hela": "hardhat run --no-compile scripts/seed.js --network helaTestnet",
     "activate:hela": "hardhat run scripts/activateDemo.ts --network helaTestnet",
+    "mint:hlusd": "hardhat run --no-compile scripts/mintDemoHlusd.ts --network helaTestnet",
     "automation:run": "ts-node scripts/automationWorker.ts",
     "automation:watch": "AUTOMATION_WORKER_MODE=watch ts-node scripts/automationWorker.ts",
     "automation:migrate:supabase": "node scripts/migrateAutomationStoreToSupabase.js",

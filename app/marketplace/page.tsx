@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { TopNavBar } from "@/components/TopNavBar";
 import { AgentCard } from "@/components/AgentCard";
+import { getConnectedAccount } from "@/lib/wallet";
 
 type MarketplaceAgent = {
   id: number;
@@ -19,6 +20,12 @@ type MarketplaceAgent = {
 
 type AgentsRouteResponse = {
   agents?: MarketplaceAgent[];
+  error?: string;
+};
+
+type OwnedAgentsRouteResponse = {
+  activeAgents?: Array<{ id: number }>;
+  publishedAgents?: MarketplaceAgent[];
   error?: string;
 };
 
@@ -87,6 +94,9 @@ const UPCOMING_AGENTS: UpcomingAgent[] = [
 export default function MarketplacePage() {
   const [selectedType, setSelectedType] = useState("ALL");
   const [agents, setAgents] = useState<MarketplaceAgent[]>([]);
+  const [ownedAgentIds, setOwnedAgentIds] = useState<number[]>([]);
+  const [publishedAgentIds, setPublishedAgentIds] = useState<number[]>([]);
+  const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -129,12 +139,79 @@ export default function MarketplacePage() {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadOwnedAgents() {
+      try {
+        const account = await getConnectedAccount();
+        if (!account) {
+          if (active) {
+            setOwnedAgentIds([]);
+            setPublishedAgentIds([]);
+            setConnectedWallet(null);
+          }
+          return;
+        }
+
+        if (active) {
+          setConnectedWallet(account);
+        }
+
+        const response = await fetch(`/api/agents/user/${account}`, {
+          method: "GET",
+          cache: "no-store"
+        });
+
+        const data = (await response.json()) as OwnedAgentsRouteResponse;
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to load owned agents.");
+        }
+
+        if (active) {
+          setAgents((current) => {
+            const merged = [...current];
+            const existingIds = new Set(current.map((agent) => agent.id));
+            const ownedPublished = Array.isArray(data.publishedAgents) ? data.publishedAgents : [];
+
+            for (const published of ownedPublished) {
+              if (!existingIds.has(published.id)) {
+                merged.push(published);
+                existingIds.add(published.id);
+              }
+            }
+
+            return merged;
+          });
+
+          setOwnedAgentIds(
+            Array.isArray(data.activeAgents) ? data.activeAgents.map((agent) => agent.id) : []
+          );
+          setPublishedAgentIds(
+            Array.isArray(data.publishedAgents) ? data.publishedAgents.map((agent) => agent.id) : []
+          );
+        }
+      } catch {
+        if (active) {
+          setOwnedAgentIds([]);
+          setPublishedAgentIds([]);
+        }
+      }
+    }
+
+    void loadOwnedAgents();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const filteredAgents = useMemo(() => {
     if (selectedType === "ALL") {
       return agents;
     }
     return agents.filter((agent) => agent.type === selectedType);
   }, [agents, selectedType]);
+  const connectedWalletLower = connectedWallet?.toLowerCase() || null;
 
   return (
     <main className="min-h-screen bg-black">
@@ -180,7 +257,17 @@ export default function MarketplacePage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-8">
           {filteredAgents.map((agent) => (
-            <AgentCard key={agent.id} {...agent} />
+            <AgentCard
+              key={agent.id}
+              {...agent}
+              isOwnedByCurrentUser={
+                ownedAgentIds.includes(agent.id) ||
+                publishedAgentIds.includes(agent.id) ||
+                (Boolean(connectedWalletLower) &&
+                  Boolean(agent.developer) &&
+                  connectedWalletLower === agent.developer!.toLowerCase())
+              }
+            />
           ))}
         </div>
       )}

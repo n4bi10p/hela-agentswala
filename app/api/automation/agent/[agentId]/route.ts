@@ -29,6 +29,7 @@ export async function GET(_req: Request, context: RouteContext) {
         ? {
             agentId: storedAgent.agentId,
             agentWalletAddress: storedAgent.agentWalletAddress,
+            developerAddress: storedAgent.developerAddress,
             status: storedAgent.status,
             deployedAt: storedAgent.deployedAt
           }

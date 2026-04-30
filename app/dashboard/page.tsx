@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { TopNavBar } from "@/components/TopNavBar";
 import Link from "next/link";
+import { fetchHLUSDBalanceForAddress, fetchNativeBalanceForAddress } from "@/lib/contracts";
 import { connectWallet, ensureHeLaNetwork, getConnectedAccount, transferHLUSD } from "@/lib/wallet";
 
 type DashboardAgent = {
@@ -144,6 +145,22 @@ function shortenAddress(address: string): string {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
+function formatBalanceValue(value: string | null | undefined): string {
+  if (!value) {
+    return "--";
+  }
+
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return value;
+  }
+
+  return numeric.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 4
+  });
+}
+
 function safeConfigPreview(config: Record<string, unknown>) {
   return Object.entries(config)
     .slice(0, 3)
@@ -206,8 +223,18 @@ function formatWalletBalance(job: AutomationJobView): string {
   return `${job.balanceHLUSD || "0"} HLUSD`;
 }
 
+function normalizeAgentId(value: string | number): number | null {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  return parsed;
+}
+
 export default function DashboardPage() {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [walletHlusdBalance, setWalletHlusdBalance] = useState<string | null>(null);
+  const [walletNativeBalance, setWalletNativeBalance] = useState<string | null>(null);
   const [activeAgents, setActiveAgents] = useState<DashboardAgent[]>([]);
   const [publishedAgents, setPublishedAgents] = useState<PublishedAgent[]>([]);
   const [activityLog, setActivityLog] = useState<ActivityItem[]>([]);
@@ -218,18 +245,63 @@ export default function DashboardPage() {
   const [activeJobActionId, setActiveJobActionId] = useState<string | null>(null);
   const [activeGasFundingJobId, setActiveGasFundingJobId] = useState<string | null>(null);
   const [activeHlusdFundingJobId, setActiveHlusdFundingJobId] = useState<string | null>(null);
+  const [isClaimingHlusd, setIsClaimingHlusd] = useState(false);
   const [hlusdFundingAmounts, setHlusdFundingAmounts] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  const runningAgentsCount = useMemo(
-    () => activeAgents.filter((agent) => agent.isLive).length,
-    [activeAgents]
-  );
+  const totalAgentCount = useMemo(() => {
+    const uniqueIds = new Set<number>();
+    for (const agent of activeAgents) {
+      uniqueIds.add(agent.id);
+    }
+    for (const agent of publishedAgents) {
+      uniqueIds.add(agent.id);
+    }
+    return uniqueIds.size;
+  }, [activeAgents, publishedAgents]);
+
+  const runningAgentsCount = useMemo(() => {
+    const runningIds = new Set<number>();
+    for (const agent of activeAgents) {
+      if (agent.isLive) {
+        runningIds.add(agent.id);
+      }
+    }
+    for (const agent of publishedAgents) {
+      if (agent.isLive) {
+        runningIds.add(agent.id);
+      }
+    }
+    return runningIds.size;
+  }, [activeAgents, publishedAgents]);
 
   const totalExecutions = useMemo(
     () => activeAgents.reduce((sum, agent) => sum + agent.executions, 0) + automationLogs.length,
     [activeAgents, automationLogs]
   );
+
+  const knownAgentsById = useMemo(() => {
+    const map = new Map<number, { name: string; type: string; agentType: string }>();
+
+    for (const agent of activeAgents) {
+      map.set(agent.id, {
+        name: agent.name,
+        type: agent.type,
+        agentType: agent.agentType
+      });
+    }
+
+    for (const agent of publishedAgents) {
+      map.set(agent.id, {
+        name: agent.name,
+        type: agent.type,
+        agentType: agent.agentType
+      });
+    }
+
+    return map;
+  }, [activeAgents, publishedAgents]);
 
   const combinedFeed = useMemo(() => {
     const automationItems = automationLogs.map((log) => ({
@@ -350,8 +422,48 @@ export default function DashboardPage() {
     }
   };
 
+  const handleClaimTestHLUSD = async () => {
+    if (!walletAddress) {
+      setError("Connect your wallet before claiming test HLUSD.");
+      return;
+    }
+
+    try {
+      setIsClaimingHlusd(true);
+      setError(null);
+      setNotice(null);
+
+      const response = await fetch("/api/faucet/hlusd", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ address: walletAddress })
+      });
+
+      const payload = (await response.json()) as {
+        amount?: string;
+        txHash?: string;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to claim test HLUSD.");
+      }
+
+      await loadDashboardForAddress(walletAddress);
+      setNotice(
+        `Minted ${payload.amount || "0"} HLUSD to ${shortenAddress(walletAddress)}. Tx: ${payload.txHash || "submitted"}`
+      );
+    } catch (claimError) {
+      setError(claimError instanceof Error ? claimError.message : "Failed to claim test HLUSD.");
+    } finally {
+      setIsClaimingHlusd(false);
+    }
+  };
+
   const loadDashboardForAddress = useCallback(async (address: string) => {
-    const [dashboardResponse, automationResponse] = await Promise.all([
+    const [dashboardResponse, automationResponse, hlusdBalance, nativeBalance] = await Promise.all([
       fetch(`/api/agents/user/${address}`, {
         method: "GET",
         cache: "no-store"
@@ -359,7 +471,9 @@ export default function DashboardPage() {
       fetch(`/api/automation/overview?ownerAddress=${encodeURIComponent(address)}`, {
         method: "GET",
         cache: "no-store"
-      }).catch(() => null)
+      }).catch(() => null),
+      fetchHLUSDBalanceForAddress(address).catch(() => null),
+      fetchNativeBalanceForAddress(address).catch(() => null)
     ]);
 
     const dashboardData = (await dashboardResponse.json()) as DashboardRouteResponse;
@@ -384,6 +498,8 @@ export default function DashboardPage() {
     }
 
     setWalletAddress(dashboardData.walletAddress || address);
+    setWalletHlusdBalance(hlusdBalance);
+    setWalletNativeBalance(nativeBalance);
     setActiveAgents(Array.isArray(dashboardData.activeAgents) ? dashboardData.activeAgents : []);
     setPublishedAgents(Array.isArray(dashboardData.publishedAgents) ? dashboardData.publishedAgents : []);
     setActivityLog(Array.isArray(dashboardData.activity) ? dashboardData.activity : []);
@@ -399,6 +515,8 @@ export default function DashboardPage() {
       const connected = await getConnectedAccount();
       if (!connected) {
         setWalletAddress(null);
+        setWalletHlusdBalance(null);
+        setWalletNativeBalance(null);
         setActiveAgents([]);
         setPublishedAgents([]);
         setActivityLog([]);
@@ -473,6 +591,12 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {notice && (
+          <div className="mb-8 border border-emerald-500/60 bg-emerald-500/10 p-4">
+            <p className="font-mono text-xs uppercase text-emerald-200">{notice}</p>
+          </div>
+        )}
+
         {isLoading && (
           <div className="mb-8 border border-white/12 p-6">
             <p className="font-mono text-sm uppercase text-white/60">Loading dashboard...</p>
@@ -483,13 +607,40 @@ export default function DashboardPage() {
           <div className="mb-8 border border-white/12 p-4">
             <p className="font-mono text-xs uppercase text-white/60">Connected Wallet</p>
             <p className="break-all font-mono text-sm text-white">{walletAddress}</p>
+            <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+              <div className="border border-white/10 bg-white/5 p-3">
+                <p className="font-mono text-[11px] uppercase text-white/50">HLUSD Token Balance</p>
+                <p className="font-mono text-sm text-white">{formatBalanceValue(walletHlusdBalance)} HLUSD</p>
+              </div>
+              <div className="border border-white/10 bg-white/5 p-3">
+                <p className="font-mono text-[11px] uppercase text-white/50">Native HELA (Gas)</p>
+                <p className="font-mono text-sm text-white">{formatBalanceValue(walletNativeBalance)} HELA</p>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                onClick={handleClaimTestHLUSD}
+                disabled={isClaimingHlusd}
+                className="border border-white bg-white px-4 py-2 font-headline text-xs uppercase text-black transition-colors hover:bg-black hover:text-white disabled:opacity-50"
+              >
+                {isClaimingHlusd ? "MINTING HLUSD..." : "[ CLAIM TEST HLUSD ↗ ]"}
+              </button>
+              <a
+                href={FAUCET_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="border border-white px-4 py-2 font-headline text-xs uppercase text-white transition-colors hover:bg-white hover:text-black"
+              >
+                [ GET NATIVE HELA GAS ↗ ]
+              </a>
+            </div>
           </div>
         )}
 
         <div className="mb-12 grid grid-cols-1 gap-6 md:grid-cols-4">
           <div className="flex flex-col gap-2 border border-white/12 p-6">
             <p className="font-mono text-xs uppercase text-white/60">Active Agents</p>
-            <p className="font-headline text-6xl text-white">{activeAgents.length}</p>
+            <p className="font-headline text-6xl text-white">{totalAgentCount}</p>
           </div>
           <div className="flex flex-col gap-2 border border-white/12 p-6">
             <p className="font-mono text-xs uppercase text-white/60">Total Executions</p>
@@ -521,10 +672,17 @@ export default function DashboardPage() {
                   <div className="mb-4 flex items-start justify-between gap-4">
                     {(() => {
                       const readiness = getAutomationReadiness(job);
+                      const numericAgentId = normalizeAgentId(job.agentId);
+                      const jobAgent = numericAgentId !== null ? knownAgentsById.get(numericAgentId) : null;
                       return (
                         <>
                     <div>
-                      <h3 className="font-headline text-2xl uppercase text-white">Agent {job.agentId}</h3>
+                      <h3 className="font-headline text-2xl uppercase text-white">
+                        {jobAgent?.name || `Agent ${job.agentId}`} {numericAgentId !== null ? `· #${numericAgentId}` : ""}
+                      </h3>
+                      <p className="font-mono text-xs uppercase text-white/60">
+                        Category: {jobAgent?.type || "Unknown"}
+                      </p>
                       <p className="font-mono text-xs uppercase text-white/60">Frequency: {job.frequency}</p>
                     </div>
                     <div className="flex flex-col items-end gap-2">
@@ -672,6 +830,29 @@ export default function DashboardPage() {
                   )}
 
                   <div className="mt-4 flex flex-col gap-3 md:flex-row">
+                    {(() => {
+                      const numericAgentId = normalizeAgentId(job.agentId);
+                      if (numericAgentId === null) {
+                        return null;
+                      }
+
+                      return (
+                        <>
+                          <Link
+                            href={`/agent/${numericAgentId}`}
+                            className="border border-white px-4 py-3 text-center font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black"
+                          >
+                            [ OPEN AGENT ↗ ]
+                          </Link>
+                          <Link
+                            href={`/agent/${numericAgentId}/run`}
+                            className="border border-white px-4 py-3 text-center font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black"
+                          >
+                            [ OPEN INTERACTION ↗ ]
+                          </Link>
+                        </>
+                      );
+                    })()}
                     <button
                       onClick={() => handleJobAction(job.id, "run_now")}
                       disabled={activeJobActionId === `${job.id}:run_now`}
@@ -719,8 +900,10 @@ export default function DashboardPage() {
                 <div key={`published-${agent.id}`} className="group border border-white/12 p-6 transition-colors hover:border-white">
                   <div className="mb-4 flex items-start justify-between">
                     <div>
-                      <h3 className="font-headline text-2xl uppercase text-white">{agent.name}</h3>
-                      <p className="font-mono text-xs text-white/60">{agent.type}</p>
+                      <h3 className="font-headline text-2xl uppercase text-white">
+                        {agent.name} · #{agent.id}
+                      </h3>
+                      <p className="font-mono text-xs text-white/60">Category: {agent.type}</p>
                     </div>
                     <div className={`flex items-center gap-2 font-mono text-xs ${agent.isLive ? "text-live-signal" : "text-white/20"}`}>
                       <span className={`h-2 w-2 rounded-full ${agent.isLive ? "bg-live-signal" : "bg-white/20"}`}></span>
@@ -744,11 +927,24 @@ export default function DashboardPage() {
                       <p className="font-mono text-sm text-white">{agent.activeCount}</p>
                     </div>
                     <div>
-                      <p className="font-mono text-xs uppercase text-white/60">Open</p>
-                      <Link href={`/agent/${agent.id}`} className="font-mono text-sm text-white transition-colors hover:text-white/60">
-                        [ VIEW ↗ ]
-                      </Link>
+                      <p className="font-mono text-xs uppercase text-white/60">Status</p>
+                      <p className="font-mono text-sm text-white">{agent.isLive ? "LIVE" : "IDLE"}</p>
                     </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-col gap-3 md:flex-row">
+                    <Link
+                      href={`/agent/${agent.id}`}
+                      className="inline-block w-full border border-white px-6 py-2 text-center font-headline uppercase text-white transition-colors hover:bg-white hover:text-black md:w-auto"
+                    >
+                      [ OPEN AGENT ↗ ]
+                    </Link>
+                    <Link
+                      href={`/agent/${agent.id}/run`}
+                      className="inline-block w-full border border-white bg-white px-6 py-2 text-center font-headline uppercase text-black transition-colors hover:bg-black hover:text-white md:w-auto"
+                    >
+                      [ OPEN INTERACTION ↗ ]
+                    </Link>
                   </div>
                 </div>
               ))}
@@ -801,18 +997,20 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  {(agent.agentType === "content" || agent.agentType === "business") ? (
+                  <div className="flex flex-col gap-3 md:flex-row">
+                    <Link
+                      href={`/agent/${agent.id}`}
+                      className="inline-block w-full border border-white px-6 py-2 text-center font-headline uppercase text-white transition-colors hover:bg-white hover:text-black md:w-auto"
+                    >
+                      [ OPEN AGENT ↗ ]
+                    </Link>
                     <Link
                       href={`/agent/${agent.id}/run`}
-                      className="inline-block w-full border border-white bg-white px-6 py-2 font-headline uppercase text-black transition-colors hover:bg-black hover:text-white md:w-auto"
+                      className="inline-block w-full border border-white bg-white px-6 py-2 text-center font-headline uppercase text-black transition-colors hover:bg-black hover:text-white md:w-auto"
                     >
-                      [ INTERACT ↗ ]
+                      [ OPEN INTERACTION ↗ ]
                     </Link>
-                  ) : (
-                    <button className="inline-block w-full cursor-not-allowed border border-white px-6 py-2 font-headline uppercase text-white opacity-50 transition-colors hover:bg-white hover:text-black md:w-auto">
-                      [ VIEW LOGS ↗ ]
-                    </button>
-                  )}
+                  </div>
                 </div>
               ))}
             </div>

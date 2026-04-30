@@ -1,12 +1,16 @@
 import { formatUnits } from "ethers";
 import { NextResponse } from "next/server";
 import { fetchAgentActivationCount, fetchAgentById } from "@/lib/contracts";
+import { listStoredAgents } from "@/lib/automationStore";
 import {
   getAgentImage,
   isHiddenAgentName,
   normalizeAgentDescription,
   toAgentTypeLabel
 } from "@/lib/agentUi";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 type RouteParams = {
   params: {
@@ -43,14 +47,17 @@ export async function GET(_request: Request, { params }: RouteParams) {
   }
 
   try {
-    const [agent, activeCount] = await Promise.all([
+    const [agent, activeCount, storedAgents] = await Promise.all([
       fetchAgentById(parsedId),
-      fetchAgentActivationCount(parsedId).catch(() => 0)
+      fetchAgentActivationCount(parsedId).catch(() => 0),
+      listStoredAgents().catch(() => [])
     ]);
 
     if (isHiddenAgentName(agent.name)) {
       return NextResponse.json({ error: "Agent not found." }, { status: 404 });
     }
+
+    const storedDeveloper = storedAgents.find((entry) => Number(entry.agentId) === parsedId)?.developerAddress;
 
     return NextResponse.json(
       {
@@ -65,7 +72,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
           isLive: agent.isActive,
           image: getAgentImage(agent.agentType),
           configSchema: agent.configSchema,
-          developer: agent.developer
+          developer: storedDeveloper || agent.developer
         }
       },
       { status: 200 }

@@ -12,3 +12,4 @@ out
 *.tsbuildinfo
 deployments/latest.json
 deployments/hardhat.json
+cloudrun.env.yaml

@@ -8,11 +8,19 @@ import { useParams } from "next/navigation";
 import { parseUnits } from "ethers";
 import {
   activateAgent as activateAgentOnChain,
+  fetchNativeBalanceForAddress,
   getPublicContractAddresses,
   isAgentActivatedByUser
 } from "@/lib/contracts";
 import { calculateDeveloperPayout, calculatePlatformFee, PLATFORM_FEE_PERCENT } from "@/lib/platformFee";
-import { approveHLUSD, connectWallet, ensureHeLaNetwork, getConnectedAccount, transferHLUSD } from "@/lib/wallet";
+import {
+  approveHLUSD,
+  connectWallet,
+  ensureHeLaNetwork,
+  getConnectedAccount,
+  getHLUSDBalance,
+  transferHLUSD
+} from "@/lib/wallet";
 import { getAgentImage, parseConfigSchema } from "@/lib/agentUi";
 
 const AGENTS: Record<
@@ -204,6 +212,7 @@ type RemoteAgent = {
   isLive: boolean;
   image: string;
   configSchema: string;
+  developer?: string;
 };
 
 type AgentRouteResponse = {
@@ -233,6 +242,7 @@ type AutomationAgentState = {
   storedAgent: {
     agentId: string;
     agentWalletAddress: string;
+    developerAddress?: string;
     status: "active" | "paused";
     deployedAt: string;
   } | null;
@@ -720,8 +730,10 @@ export default function AgentDetailPage() {
 
   const [formData, setFormData] = useState<Record<string, string>>({});
   const [isActivating, setIsActivating] = useState(false);
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [activationError, setActivationError] = useState<string | null>(null);
   const [activationSuccess, setActivationSuccess] = useState<string | null>(null);
+  const [isOwnedByConnectedWallet, setIsOwnedByConnectedWallet] = useState(false);
   const [agentFromBackend, setAgentFromBackend] = useState<AgentProfile | null>(null);
   const [isAgentLoading, setIsAgentLoading] = useState(true);
   const [agentLoadError, setAgentLoadError] = useState<string | null>(null);
@@ -774,6 +786,7 @@ export default function AgentDetailPage() {
 
         const currentAccount = await getConnectedAccount().catch(() => null);
         let nextExistingJob: AutomationJobView | null = null;
+        let nextOwnedState = false;
         if (currentAccount) {
           const jobsResponse = await fetch(
             `/api/automation/jobs?ownerAddress=${encodeURIComponent(currentAccount)}`,
@@ -787,12 +800,41 @@ export default function AgentDetailPage() {
             const jobsPayload = (await jobsResponse.json()) as { jobs?: AutomationJobView[] };
             nextExistingJob = selectLatestJobForAgent(jobsPayload.jobs, agentId);
           }
+
+          const activatedByWallet = await isAgentActivatedByUser(currentAccount, Number(agentId)).catch(() => false);
+          const creatorByChain =
+            typeof agentData.agent.developer === "string" &&
+            agentData.agent.developer.toLowerCase() === currentAccount.toLowerCase();
+          const creatorByStoredMetadata =
+            typeof nextAutomationState?.storedAgent?.developerAddress === "string" &&
+            nextAutomationState.storedAgent.developerAddress.toLowerCase() === currentAccount.toLowerCase();
+
+          nextOwnedState = activatedByWallet || creatorByChain || creatorByStoredMetadata;
+        }
+
+        let storedConfig: Record<string, string> | null = null;
+        if (typeof window !== "undefined") {
+          try {
+            const raw = window.localStorage.getItem(`agent-config-${agentId}`);
+            if (raw) {
+              const parsed = JSON.parse(raw) as unknown;
+              if (parsed && typeof parsed === "object") {
+                storedConfig = parsed as Record<string, string>;
+              }
+            }
+          } catch {
+            storedConfig = null;
+          }
         }
 
         if (active) {
           setAgentFromBackend(toAgentProfile(agentData.agent));
           setAutomationState(nextAutomationState);
           setExistingJob(nextExistingJob);
+          setIsOwnedByConnectedWallet(nextOwnedState);
+          if (storedConfig) {
+            setFormData(storedConfig);
+          }
           const storedAgent = nextAutomationState?.storedAgent;
           if (storedAgent) {
             setCreatedJob((current) =>
@@ -897,6 +939,27 @@ export default function AgentDetailPage() {
       }
 
       if (price > 0) {
+        const [hlusdBalanceRaw, nativeBalanceRaw] = await Promise.all([
+          getHLUSDBalance(account),
+          fetchNativeBalanceForAddress(account)
+        ]);
+
+        const hlusdBalance = Number(hlusdBalanceRaw);
+        if (!Number.isFinite(hlusdBalance) || hlusdBalance + 1e-9 < price) {
+          throw new Error(
+            `This wallet needs ${price} HLUSD to activate this agent, but it currently has ${hlusdBalanceRaw} HLUSD and ${nativeBalanceRaw} HELA (native gas).`
+          );
+        }
+
+        const nativeBalance = Number(nativeBalanceRaw);
+        if (!Number.isFinite(nativeBalance) || nativeBalance <= 0) {
+          throw new Error(
+            "This wallet does not have native HeLa gas for the activation transaction. Fund native gas and try again."
+          );
+        }
+      }
+
+      if (price > 0) {
         const { escrow } = getPublicContractAddresses();
         await approveHLUSD(escrow, parseUnits(String(price), 18));
       }
@@ -907,11 +970,33 @@ export default function AgentDetailPage() {
         window.localStorage.setItem(`agent-config-${agentId}`, JSON.stringify(formData));
       }
 
+      setIsOwnedByConnectedWallet(true);
       setActivationSuccess(`Agent ${agent.name} activated on-chain. Tx: ${txResult.hash}`);
     } catch (error: unknown) {
+      console.error("[AGENT_ACTIVATION] Failed", error);
       setActivationError(error instanceof Error ? error.message : "Activation failed.");
     } finally {
       setIsActivating(false);
+    }
+  };
+
+  const handleSaveConfig = async () => {
+    setActivationError(null);
+    setActivationSuccess(null);
+    setIsSavingConfig(true);
+
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(`agent-config-${agentId}`, JSON.stringify(formData));
+      }
+
+      setActivationSuccess(
+        "Agent configuration updated locally. Open interaction or refresh automation settings to use the new config."
+      );
+    } catch (error: unknown) {
+      setActivationError(error instanceof Error ? error.message : "Failed to update agent configuration.");
+    } finally {
+      setIsSavingConfig(false);
     }
   };
 
@@ -1384,12 +1469,24 @@ export default function AgentDetailPage() {
             </div>
 
             <button
-              onClick={handleActivate}
-              disabled={isActivating}
+              onClick={isOwnedByConnectedWallet ? handleSaveConfig : handleActivate}
+              disabled={isOwnedByConnectedWallet ? isSavingConfig : isActivating}
               className="w-full border border-white bg-white py-4 font-headline text-xl uppercase text-black transition-colors hover:bg-black hover:text-white disabled:opacity-50"
             >
-              {isActivating ? "ACTIVATING..." : "[ ACTIVATE ↗ ]"}
+              {isOwnedByConnectedWallet
+                ? isSavingConfig
+                  ? "UPDATING..."
+                  : "[ UPDATE CONFIG ↗ ]"
+                : isActivating
+                  ? "ACTIVATING..."
+                  : "[ ACTIVATE ↗ ]"}
             </button>
+
+            {isOwnedByConnectedWallet && (
+              <p className="font-mono text-[11px] uppercase text-white/50">
+                This wallet already owns this agent. Updating the config will not trigger a new purchase.
+              </p>
+            )}
 
             {activationError && (
               <div className="border border-red-500/60 bg-red-500/10 p-3">
@@ -1403,13 +1500,19 @@ export default function AgentDetailPage() {
               </div>
             )}
 
-            {["CONTENT", "BUSINESS", "TRADING", "FARMING", "REBALANCING", "SCHEDULING"].includes(agent.type) && (
+            {isOwnedByConnectedWallet && ["CONTENT", "BUSINESS", "TRADING", "FARMING", "REBALANCING", "SCHEDULING"].includes(agent.type) && (
               <Link
                 href={`/agent/${agentId}/run`}
                 className="w-full border border-white py-4 text-center font-headline text-xl uppercase text-white transition-colors hover:bg-white hover:text-black"
               >
                 [ OPEN INTERACTION ↗ ]
               </Link>
+            )}
+
+            {!isOwnedByConnectedWallet && (
+              <p className="font-mono text-[11px] uppercase text-white/50">
+                Activate this agent first to unlock interaction.
+              </p>
             )}
 
             <div className="border border-white/12 p-4">

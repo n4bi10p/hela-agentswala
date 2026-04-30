@@ -1,5 +1,6 @@
 import { formatUnits } from "ethers";
 import { NextResponse } from "next/server";
+import { listStoredAgents } from "@/lib/automationStore";
 import {
   fetchAgentActivationCount,
   fetchActivationEventsForUser,
@@ -13,6 +14,9 @@ import {
   normalizeAgentDescription,
   toAgentTypeLabel
 } from "@/lib/agentUi";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 type RouteParams = {
   params: {
@@ -71,12 +75,22 @@ export async function GET(_request: Request, { params }: RouteParams) {
   }
 
   try {
-    const [allAgents, activeIdsRaw, activationEvents, executionEvents] = await Promise.all([
+    const [allAgents, activeIdsRaw, activationEvents, executionEvents, storedAgents] = await Promise.all([
       fetchAllAgents(),
       fetchUserActiveAgentIds(address).catch(() => []),
       fetchActivationEventsForUser(address).catch(() => []),
-      fetchExecutionEventsForUser(address).catch(() => [])
+      fetchExecutionEventsForUser(address).catch(() => []),
+      listStoredAgents().catch(() => [])
     ]);
+
+    const storedDeveloperByAgentId = new Map(
+      storedAgents
+        .filter((entry) => entry.developerAddress && entry.agentId)
+        .map((entry) => [Number(entry.agentId), entry.developerAddress])
+    );
+
+    const getDeveloperForAgent = (agentId: number, fallback: string) =>
+      storedDeveloperByAgentId.get(agentId) || fallback;
 
     const activeIds =
       activeIdsRaw.length > 0
@@ -110,11 +124,11 @@ export async function GET(_request: Request, { params }: RouteParams) {
 
     const uniqueActiveIds = Array.from(new Set(activeIds)).sort((left, right) => left - right);
 
-    const publishedVisibleAgents = visibleAgents.filter(
-      (agent) => agent.developer.toLowerCase() === address.toLowerCase()
+    const publishedAllAgents = allAgents.filter(
+      (agent) => getDeveloperForAgent(Number(agent.id), agent.developer).toLowerCase() === address.toLowerCase()
     );
     const publishedActivationCounts = await Promise.all(
-      publishedVisibleAgents.map(async (agent) => {
+      publishedAllAgents.map(async (agent) => {
         try {
           return await fetchAgentActivationCount(Number(agent.id));
         } catch {
@@ -149,8 +163,8 @@ export async function GET(_request: Request, { params }: RouteParams) {
       })
       .filter((item): item is NonNullable<typeof item> => item !== null);
 
-    const publishedAgents: PublishedAgent[] = visibleAgents
-      .filter((agent) => agent.developer.toLowerCase() === address.toLowerCase())
+    const publishedAgents: PublishedAgent[] = allAgents
+      .filter((agent) => getDeveloperForAgent(Number(agent.id), agent.developer).toLowerCase() === address.toLowerCase())
       .map((agent, index) => ({
         id: Number(agent.id),
         name: agent.name,
@@ -160,7 +174,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
         isLive: agent.isActive,
         image: getAgentImage(agent.agentType),
         price: toPrice(agent.priceHLUSD),
-        developer: agent.developer,
+        developer: getDeveloperForAgent(Number(agent.id), agent.developer),
         activeCount: publishedActivationCounts[index] || 0
       }))
       .sort((left, right) => left.id - right.id);

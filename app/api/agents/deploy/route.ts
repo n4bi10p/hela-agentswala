@@ -15,6 +15,15 @@ type DeployRequestBody = {
   executionCode?: string;
   developerAddress?: string;
   signature?: string;
+  agentId?: string;
+  txHash?: string;
+};
+
+type DeployRequestBodyWithRequiredCore = DeployRequestBody & {
+  agent: AgentObject;
+  executionCode: string;
+  developerAddress: string;
+  signature: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -28,12 +37,7 @@ function errorMessage(error: unknown): string {
   return "Unknown error";
 }
 
-function hasRequiredBodyFields(body: DeployRequestBody): body is {
-  agent: AgentObject;
-  executionCode: string;
-  developerAddress: string;
-  signature: string;
-} {
+function hasRequiredBodyFields(body: DeployRequestBody): body is DeployRequestBodyWithRequiredCore {
   return Boolean(body.agent) &&
     typeof body.executionCode === "string" &&
     body.executionCode.trim().length > 0 &&
@@ -176,6 +180,33 @@ export async function POST(req: Request) {
     const recovered = ethers.verifyMessage(`Deploy agent: ${agent.name}`, signature);
     if (recovered.toLowerCase() !== developerAddress.toLowerCase()) {
       return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+    }
+
+    if (typeof body.agentId === "string" && body.agentId.trim().length > 0) {
+      const agentWallet = ethers.Wallet.createRandom();
+      const agentId = body.agentId.trim();
+
+      console.log("[DEPLOY] Step 2: storing deployed agent metadata (on-chain publish already completed)");
+      await storeAgent(
+        agentId,
+        agent,
+        executionCode,
+        developerAddress,
+        agentWallet.address,
+        agentWallet.privateKey
+      );
+
+      return NextResponse.json(
+        {
+          agentId,
+          agentWalletAddress: agentWallet.address,
+          txHash: typeof body.txHash === "string" ? body.txHash : null,
+          explorerUrl: typeof body.txHash === "string" ? `https://testnet-explorer.helachain.com/tx/${body.txHash}` : null,
+          marketplaceUrl: `/agent/${agentId}`,
+          deployed: true
+        },
+        { status: 200 }
+      );
     }
 
     console.log("[DEPLOY] Step 2: preparing provider and signer");

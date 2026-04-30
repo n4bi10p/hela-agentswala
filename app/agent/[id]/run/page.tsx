@@ -4,6 +4,8 @@ import { TopNavBar } from "@/components/TopNavBar";
 import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
 import { useParams } from "next/navigation";
+import { isAgentActivatedByUser } from "@/lib/contracts";
+import { connectWallet, getConnectedAccount } from "@/lib/wallet";
 
 type BackendAgentType =
   | "content"
@@ -77,6 +79,7 @@ type AgentRouteResponse = {
     name: string;
     type: string;
     agentType: string;
+    developer?: string;
   };
   error?: string;
 };
@@ -519,6 +522,9 @@ export default function AgentRunPage() {
   const params = useParams();
   const agentId = params.id as string;
 
+  const [isAccessLoading, setIsAccessLoading] = useState(true);
+  const [canAccessInteraction, setCanAccessInteraction] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
   const [agent, setAgent] = useState<AgentDetails | null>(null);
   const [isAgentLoading, setIsAgentLoading] = useState(true);
   const [agentLoadError, setAgentLoadError] = useState<string | null>(null);
@@ -536,6 +542,69 @@ export default function AgentRunPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function checkAccess() {
+      setIsAccessLoading(true);
+      setAccessError(null);
+
+      try {
+        const numericAgentId = Number(agentId);
+        if (!Number.isFinite(numericAgentId) || numericAgentId <= 0) {
+          throw new Error("Invalid agent id.");
+        }
+
+        const account = (await getConnectedAccount()) || (await connectWallet());
+        const [agentResponse, automationAgentResponse] = await Promise.all([
+          fetch(`/api/agents/${agentId}`, { method: "GET", cache: "no-store" }),
+          fetch(`/api/automation/agent/${agentId}`, { method: "GET", cache: "no-store" }).catch(() => null)
+        ]);
+
+        const agentPayload = (await agentResponse.json()) as AgentRouteResponse;
+        const creatorByChain =
+          agentResponse.ok &&
+          Boolean(agentPayload.agent?.developer) &&
+          agentPayload.agent!.developer!.toLowerCase() === account.toLowerCase();
+
+        let creatorByStoredMetadata = false;
+        if (automationAgentResponse && automationAgentResponse.ok) {
+          const automationPayload = (await automationAgentResponse.json()) as {
+            storedAgent?: { developerAddress?: string } | null;
+          };
+          creatorByStoredMetadata =
+            typeof automationPayload.storedAgent?.developerAddress === "string" &&
+            automationPayload.storedAgent.developerAddress.toLowerCase() === account.toLowerCase();
+        }
+
+        const isActivated = await isAgentActivatedByUser(account, numericAgentId);
+        const isOwned = isActivated || creatorByChain || creatorByStoredMetadata;
+        if (!isOwned) {
+          throw new Error("Access denied. Activate this agent first to use interaction.");
+        }
+
+        if (active) {
+          setCanAccessInteraction(true);
+        }
+      } catch (error: unknown) {
+        if (active) {
+          setCanAccessInteraction(false);
+          setAccessError(error instanceof Error ? error.message : "Access denied.");
+        }
+      } finally {
+        if (active) {
+          setIsAccessLoading(false);
+        }
+      }
+    }
+
+    void checkAccess();
+
+    return () => {
+      active = false;
+    };
+  }, [agentId]);
 
   useEffect(() => {
     let active = true;
@@ -583,6 +652,50 @@ export default function AgentRunPage() {
       active = false;
     };
   }, [agentId]);
+
+  if (isAccessLoading) {
+    return (
+      <main className="min-h-screen bg-black">
+        <TopNavBar />
+        <div className="flex items-center justify-center min-h-screen pt-24">
+          <div className="text-center">
+            <h1 className="font-headline text-4xl text-white mb-4">VERIFYING ACCESS</h1>
+            <p className="font-mono text-xs text-white/60 uppercase">Checking ownership on-chain...</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (!canAccessInteraction) {
+    return (
+      <main className="min-h-screen bg-black">
+        <TopNavBar />
+        <div className="flex items-center justify-center min-h-screen pt-24">
+          <div className="text-center max-w-xl px-6">
+            <h1 className="font-headline text-4xl text-white mb-4">INTERACTION LOCKED</h1>
+            <p className="font-mono text-xs text-red-300 uppercase mb-6">
+              {accessError || "Activate this agent first to use interaction."}
+            </p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+              <Link
+                href={`/agent/${agentId}`}
+                className="border border-white px-6 py-3 font-headline text-sm uppercase text-white transition-colors hover:bg-white hover:text-black"
+              >
+                [ GO TO AGENT ↗ ]
+              </Link>
+              <Link
+                href="/marketplace"
+                className="border border-white/60 px-6 py-3 font-headline text-sm uppercase text-white/80 transition-colors hover:border-white hover:text-white"
+              >
+                [ MARKETPLACE ↗ ]
+              </Link>
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   if (!agent && isAgentLoading) {
     return (

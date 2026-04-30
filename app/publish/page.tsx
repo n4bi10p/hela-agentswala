@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { TopNavBar } from "@/components/TopNavBar";
-import { type AgentType } from "@/lib/contracts";
+import { fetchAllAgents, publishAgent, type AgentType } from "@/lib/contracts";
 import { connectWallet, ensureHeLaNetwork, persistConnectedAccount, signMessage } from "@/lib/wallet";
 
 const AGENT_TYPES = ["trading", "farming", "scheduling", "rebalancing", "content", "business"] as const;
@@ -64,6 +64,10 @@ type DeployResponse = {
   marketplaceUrl?: string;
   deployed: boolean;
 };
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function defaultSchemaFor(agentType: string) {
   if (agentType === "scheduling") {
@@ -365,10 +369,47 @@ export default function PublishPage() {
         executionLogic: formData.workflowSummary.trim()
       };
 
+      setStatusMessage("Publishing on-chain from your wallet...");
+      const beforePublishAgents = await fetchAllAgents();
+      const preExistingIds = new Set(beforePublishAgents.map((entry) => Number(entry.id)));
+
+      const publishResult = await publishAgent({
+        name: deploymentAgent.name,
+        description: deploymentAgent.description,
+        agentType: deploymentAgent.agentType,
+        price: String(parsedPrice),
+        configSchema: JSON.stringify(deploymentAgent.configSchema)
+      });
+
+      let resolvedAgentId: string | null = null;
+      const connectedLower = connectedAccount.toLowerCase();
+
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const latestAgents = await fetchAllAgents();
+        const newlyPublished = latestAgents
+          .filter((entry) => !preExistingIds.has(Number(entry.id)))
+          .filter((entry) => entry.developer.toLowerCase() === connectedLower)
+          .filter((entry) => entry.name.trim().toLowerCase() === deploymentAgent.name.trim().toLowerCase())
+          .sort((left, right) => Number(right.id) - Number(left.id));
+
+        if (newlyPublished.length > 0) {
+          resolvedAgentId = newlyPublished[0].id.toString();
+          break;
+        }
+
+        await sleep(500);
+      }
+
+      if (!resolvedAgentId) {
+        throw new Error(
+          "Published on-chain but could not resolve the new agent id yet. Refresh in a few seconds and retry deploy sync."
+        );
+      }
+
       setStatusMessage("Requesting wallet signature for deployment...");
       const signature = await signMessage(`Deploy agent: ${deploymentAgent.name}`);
 
-      setStatusMessage("Deploying agent runtime and publishing on-chain...");
+      setStatusMessage("Syncing runtime metadata...");
       const deployResponse = await fetch("/api/agents/deploy", {
         method: "POST",
         headers: {
@@ -378,7 +419,9 @@ export default function PublishPage() {
           agent: deploymentAgent,
           executionCode: executionCodeToDeploy,
           developerAddress: connectedAccount,
-          signature
+          signature,
+          agentId: resolvedAgentId,
+          txHash: publishResult.hash
         })
       });
 
@@ -393,8 +436,8 @@ export default function PublishPage() {
         );
       }
 
-      setLastTxHash("txHash" in deployPayload ? (deployPayload.txHash ?? null) : null);
-      setStatusMessage("Agent runtime deployed and published on-chain.");
+      setLastTxHash(publishResult.hash);
+      setStatusMessage("Agent published on-chain and runtime synced.");
 
       setFormData({
         name: "",
