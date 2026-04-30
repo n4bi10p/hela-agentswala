@@ -52,3 +52,41 @@ create index if not exists idx_execution_logs_executed_at on public.execution_lo
 alter table public.stored_agents enable row level security;
 alter table public.agent_jobs enable row level security;
 alter table public.execution_logs enable row level security;
+
+-- ============================================================
+-- Reputation System
+-- ============================================================
+
+create table if not exists public.agent_reviews (
+  id uuid primary key default gen_random_uuid(),
+  agent_id text not null,
+  reviewer_address text not null,
+  stars int not null check (stars between 1 and 5),
+  comment text check (char_length(comment) <= 500),
+  tags text[] not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (agent_id, reviewer_address)
+);
+
+create index if not exists idx_agent_reviews_agent_id on public.agent_reviews(agent_id);
+create index if not exists idx_agent_reviews_reviewer on public.agent_reviews(reviewer_address);
+create index if not exists idx_agent_reviews_created_at on public.agent_reviews(created_at desc);
+
+alter table public.agent_reviews enable row level security;
+
+create table if not exists public.agent_suggestions (
+  id uuid primary key default gen_random_uuid(),
+  agent_id text not null,
+  author_address text not null,
+  title text not null check (char_length(title) <= 80),
+  suggestion_type text not null check (suggestion_type in ('bug', 'feature', 'ui', 'other')),
+  description text check (char_length(description) <= 300),
+  upvotes text[] not null default '{}',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_agent_suggestions_agent_id on public.agent_suggestions(agent_id);
+create index if not exists idx_agent_suggestions_created_at on public.agent_suggestions(created_at desc);
+
+alter table public.agent_suggestions enable row level security;

@@ -5,6 +5,7 @@ import { TopNavBar } from "@/components/TopNavBar";
 import Link from "next/link";
 import { fetchHLUSDBalanceForAddress, fetchNativeBalanceForAddress } from "@/lib/contracts";
 import { connectWallet, ensureHeLaNetwork, getConnectedAccount, transferHLUSD } from "@/lib/wallet";
+import { DeveloperRepBadge } from "@/components/DeveloperRepBadge";
 
 type DashboardAgent = {
   id: number;
@@ -604,35 +605,41 @@ export default function DashboardPage() {
         )}
 
         {walletAddress && (
-          <div className="mb-8 border border-white/12 p-4">
-            <p className="font-mono text-xs uppercase text-white/60">Connected Wallet</p>
-            <p className="break-all font-mono text-sm text-white">{walletAddress}</p>
-            <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-              <div className="border border-white/10 bg-white/5 p-3">
-                <p className="font-mono text-[11px] uppercase text-white/50">HLUSD Token Balance</p>
-                <p className="font-mono text-sm text-white">{formatBalanceValue(walletHlusdBalance)} HLUSD</p>
+          <div className="mb-8 flex flex-col gap-4 border border-white/12 p-4 md:flex-row md:items-start md:justify-between">
+            <div className="flex-1">
+              <p className="font-mono text-xs uppercase text-white/60">Connected Wallet</p>
+              <p className="break-all font-mono text-sm text-white">{walletAddress}</p>
+              <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+                <div className="border border-white/10 bg-white/5 p-3">
+                  <p className="font-mono text-[11px] uppercase text-white/50">HLUSD Token Balance</p>
+                  <p className="font-mono text-sm text-white">{formatBalanceValue(walletHlusdBalance)} HLUSD</p>
+                </div>
+                <div className="border border-white/10 bg-white/5 p-3">
+                  <p className="font-mono text-[11px] uppercase text-white/50">Native HELA (Gas)</p>
+                  <p className="font-mono text-sm text-white">{formatBalanceValue(walletNativeBalance)} HELA</p>
+                </div>
               </div>
-              <div className="border border-white/10 bg-white/5 p-3">
-                <p className="font-mono text-[11px] uppercase text-white/50">Native HELA (Gas)</p>
-                <p className="font-mono text-sm text-white">{formatBalanceValue(walletNativeBalance)} HELA</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  onClick={handleClaimTestHLUSD}
+                  disabled={isClaimingHlusd}
+                  className="border border-white bg-white px-4 py-2 font-headline text-xs uppercase text-black transition-colors hover:bg-black hover:text-white disabled:opacity-50"
+                >
+                  {isClaimingHlusd ? "MINTING HLUSD..." : "[ CLAIM TEST HLUSD ↗ ]"}
+                </button>
+                <a
+                  href={FAUCET_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="border border-white px-4 py-2 font-headline text-xs uppercase text-white transition-colors hover:bg-white hover:text-black"
+                >
+                  [ GET NATIVE HELA GAS ↗ ]
+                </a>
               </div>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                onClick={handleClaimTestHLUSD}
-                disabled={isClaimingHlusd}
-                className="border border-white bg-white px-4 py-2 font-headline text-xs uppercase text-black transition-colors hover:bg-black hover:text-white disabled:opacity-50"
-              >
-                {isClaimingHlusd ? "MINTING HLUSD..." : "[ CLAIM TEST HLUSD ↗ ]"}
-              </button>
-              <a
-                href={FAUCET_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="border border-white px-4 py-2 font-headline text-xs uppercase text-white transition-colors hover:bg-white hover:text-black"
-              >
-                [ GET NATIVE HELA GAS ↗ ]
-              </a>
+            
+            <div className="w-full md:w-80 shrink-0">
+              <DeveloperRepBadge developerAddress={walletAddress} />
             </div>
           </div>
         )}

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { TopNavBar } from "@/components/TopNavBar";
 import { AgentCard } from "@/components/AgentCard";
+import { ActivityFeed } from "@/components/ActivityFeed";
 import { getConnectedAccount } from "@/lib/wallet";
 
 type MarketplaceAgent = {
@@ -231,6 +232,11 @@ export default function MarketplacePage() {
           AGENTS
         </h1>
       </header>
+
+      {/* Activity Feed */}
+      <div className="border-b border-white/10 bg-[#0a0a0f]">
+        <ActivityFeed />
+      </div>
 
       {/* Filter Tabs */}
       <section className="flex flex-wrap gap-4 px-8 py-6 bg-black border-b border-white/10 sticky top-24 z-40">

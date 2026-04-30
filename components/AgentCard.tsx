@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { PLATFORM_FEE_PERCENT } from "@/lib/platformFee";
+import { DeveloperRepBadge } from "@/components/DeveloperRepBadge";
 
 interface AgentCardProps {
   id: number;
@@ -83,9 +84,10 @@ export function AgentCard({
       </div>
 
       {creatorLabel && (
-        <p className="font-mono text-[10px] uppercase text-white/50">
-          Creator: {creatorLabel}
-        </p>
+        <div className="flex items-center gap-2 font-mono text-[10px] uppercase text-white/50">
+          <span>Creator: {creatorLabel}</span>
+          {developer && <DeveloperRepBadge developerAddress={developer} compact />}
+        </div>
       )}
 
       <p className="font-mono text-[10px] uppercase text-white/40">

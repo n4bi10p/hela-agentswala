@@ -22,6 +22,9 @@ import {
   transferHLUSD
 } from "@/lib/wallet";
 import { getAgentImage, parseConfigSchema } from "@/lib/agentUi";
+import { ReviewsSection } from "@/components/ReviewsSection";
+import { SuggestionsSection } from "@/components/SuggestionsSection";
+import { DeveloperRepBadge } from "@/components/DeveloperRepBadge";
 
 const AGENTS: Record<
   string,
@@ -190,7 +193,7 @@ const FIELD_SELECT_OPTIONS: Record<string, string[]> = {
 
 const FAUCET_URL = "https://testnet-faucet.helachain.com/";
 
-type AgentProfile = (typeof AGENTS)[string];
+type AgentProfile = (typeof AGENTS)[string] & { developer?: string };
 type AutomationFrequency = "hourly" | "daily" | "weekly" | "monthly";
 type ExecutionPolicyDraft = {
   autoExecute: boolean;
@@ -316,6 +319,7 @@ function toAgentProfile(remoteAgent: RemoteAgent): AgentProfile {
     price: remoteAgent.price,
     activeCount: remoteAgent.activeCount,
     isLive: remoteAgent.isLive,
+    developer: remoteAgent.developer,
     config: parsedConfig.length > 0 ? parsedConfig : (preset?.config || [])
   };
 }
@@ -1403,6 +1407,17 @@ export default function AgentDetailPage() {
               <p className="font-headline text-2xl text-white">{platformFee} HLUSD</p>
             </div>
           </div>
+
+          {/* Developer Reputation */}
+          {(agentFromBackend?.developer || automationState?.storedAgent?.developerAddress) && (
+            <DeveloperRepBadge
+              developerAddress={
+                automationState?.storedAgent?.developerAddress ||
+                agentFromBackend?.developer ||
+                ""
+              }
+            />
+          )}
         </div>
 
         <div className="flex flex-col gap-6 lg:col-span-2">
@@ -1783,6 +1798,26 @@ export default function AgentDetailPage() {
                 </div>
               )}
             </div>
+
+            {/* Reviews & Suggestions */}
+            <ReviewsSection
+              agentId={agentId}
+              connectedWallet={
+                automationState?.storedAgent?.developerAddress ||
+                agentFromBackend?.developer ||
+                null
+              }
+              isOwned={isOwnedByConnectedWallet}
+            />
+
+            <SuggestionsSection
+              agentId={agentId}
+              connectedWallet={
+                automationState?.storedAgent?.developerAddress ||
+                agentFromBackend?.developer ||
+                null
+              }
+            />
 
             <Link
               href="/marketplace"
