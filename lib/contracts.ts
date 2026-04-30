@@ -1,4 +1,4 @@
-import { BrowserProvider, Contract, JsonRpcProvider, formatEther, formatUnits, parseUnits } from "ethers";
+import { BrowserProvider, Contract, JsonRpcProvider, formatEther, formatUnits, parseUnits, type Signer } from "ethers";
 import { ChainIntegrationError, normalizeChainError } from "./chainErrors";
 
 export type AgentType =
@@ -77,6 +77,10 @@ const getRpcUrl = () =>
   process.env.NEXT_PUBLIC_HELA_RPC_URL ||
   "https://testnet-rpc.helachain.com";
 
+function isAddress(value: string | undefined): value is string {
+  return typeof value === "string" && /^0x[a-fA-F0-9]{40}$/.test(value);
+}
+
 const getAddresses = () => {
   const registry = process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS;
   const escrow = process.env.NEXT_PUBLIC_AGENT_ESCROW_ADDRESS;
@@ -84,6 +88,10 @@ const getAddresses = () => {
 
   if (!registry || !escrow || !executor) {
     throw new ChainIntegrationError("missing_env", "Missing NEXT_PUBLIC contract addresses in env");
+  }
+
+  if (!isAddress(registry) || !isAddress(escrow) || !isAddress(executor)) {
+    throw new ChainIntegrationError("invalid_input", "Contract addresses are not valid 0x addresses");
   }
 
   return { registry, escrow, executor };
@@ -94,6 +102,53 @@ export function getPublicContractAddresses() {
 }
 
 export const getReadProvider = () => new JsonRpcProvider(getRpcUrl());
+
+function shouldLogTx() {
+  const flag = process.env.NEXT_PUBLIC_TX_DEBUG || "";
+  return ["true", "1", "yes", "on"].includes(flag.toLowerCase());
+}
+
+async function sendContractTx(contract: Contract, method: string, args: unknown[]) {
+  const fn = contract.getFunction(method);
+  const txRequest = await fn.populateTransaction(...args);
+  const runner = contract.runner as Signer | null;
+  if (!runner || typeof runner.sendTransaction !== "function") {
+    throw new ChainIntegrationError("wallet_not_found", "Wallet signer not available for transaction");
+  }
+
+  const provider = runner.provider;
+  if (provider && typeof provider.send === "function") {
+    try {
+      const gasPriceHex = (await provider.send("eth_gasPrice", [])) as string;
+      if (gasPriceHex) {
+        txRequest.gasPrice = BigInt(gasPriceHex);
+        delete txRequest.maxFeePerGas;
+        delete txRequest.maxPriorityFeePerGas;
+      }
+    } catch {
+      // Fall back to provider defaults when gas price is unavailable.
+    }
+  }
+
+  txRequest.type = 0;
+  if (!txRequest.gasLimit && provider && typeof provider.estimateGas === "function") {
+    try {
+      txRequest.gasLimit = await provider.estimateGas(txRequest);
+    } catch {
+      // Allow wallet/provider to estimate if needed.
+    }
+  }
+
+  if (shouldLogTx()) {
+    console.log("[TX_DEBUG]", method, {
+      to: txRequest.to,
+      data: txRequest.data,
+      value: txRequest.value?.toString?.() ?? txRequest.value
+    });
+  }
+
+  return runner.sendTransaction(txRequest);
+}
 
 function normalizeAgent(agent: {
   id: bigint;
@@ -177,13 +232,13 @@ export async function publishAgent(input: {
 }): Promise<TxResult> {
   try {
     const registry = await getRegistryContract(true);
-    const tx = await registry.publishAgent(
+    const tx = await sendContractTx(registry, "publishAgent", [
       input.name,
       input.description,
       input.agentType,
       parseUnits(input.price, 18),
       input.configSchema
-    );
+    ]);
     const receipt = await tx.wait();
     return toTxResult(receipt);
   } catch (error) {
@@ -201,13 +256,12 @@ export async function updateAgentTransaction(
 ): Promise<TxResult> {
   try {
     const registry = await getRegistryContract(true);
-    const tx = await registry.updateAgent(
+    const tx = await sendContractTx(registry, "updateAgent", [
       BigInt(agentId),
       input.name,
       input.description,
-      parseUnits(input.price, 18),
-      { type: 0 }
-    );
+      parseUnits(input.price, 18)
+    ]);
     const receipt = await tx.wait();
     return toTxResult(receipt);
   } catch (error) {
@@ -218,7 +272,7 @@ export async function updateAgentTransaction(
 export async function activateAgent(agentId: number, userConfig: string): Promise<TxResult> {
   try {
     const escrow = await getEscrowContract(true);
-    const tx = await escrow.activateAgent(agentId, userConfig);
+    const tx = await sendContractTx(escrow, "activateAgent", [agentId, userConfig]);
     const receipt = await tx.wait();
     return toTxResult(receipt);
   } catch (error) {

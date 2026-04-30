@@ -24,6 +24,15 @@ const ERC20_ABI = [
   "function transfer(address to, uint256 value) returns (bool)"
 ];
 
+function isAddress(value: string | undefined): value is string {
+  return typeof value === "string" && /^0x[a-fA-F0-9]{40}$/.test(value);
+}
+
+function shouldLogTx() {
+  const flag = process.env.NEXT_PUBLIC_TX_DEBUG || "";
+  return ["true", "1", "yes", "on"].includes(flag.toLowerCase());
+}
+
 function getEthereum() {
   if (typeof window === "undefined" || !window.ethereum) {
     throw new ChainIntegrationError("wallet_not_found", "MetaMask wallet not found");
@@ -151,6 +160,10 @@ export async function getHLUSDBalance(address: string) {
       throw new ChainIntegrationError("missing_env", "Missing NEXT_PUBLIC_HLUSD_ADDRESS");
     }
 
+    if (!isAddress(token)) {
+      throw new ChainIntegrationError("invalid_input", "HLUSD contract address is invalid");
+    }
+
     const provider = new BrowserProvider(getEthereum() as never);
     const contract = new Contract(token, ERC20_ABI, provider);
 
@@ -168,11 +181,43 @@ export async function approveHLUSD(spender: string, amount: bigint) {
       throw new ChainIntegrationError("missing_env", "Missing NEXT_PUBLIC_HLUSD_ADDRESS");
     }
 
+    if (!isAddress(token) || !isAddress(spender)) {
+      throw new ChainIntegrationError("invalid_input", "HLUSD approve target address is invalid");
+    }
+
     const provider = new BrowserProvider(getEthereum() as never);
     const signer = await provider.getSigner();
     const contract = new Contract(token, ERC20_ABI, signer);
+    const txRequest = await contract.getFunction("approve").populateTransaction(spender, amount);
+    if (signer.provider && typeof signer.provider.send === "function") {
+      try {
+        const gasPriceHex = (await signer.provider.send("eth_gasPrice", [])) as string;
+        if (gasPriceHex) {
+          txRequest.gasPrice = BigInt(gasPriceHex);
+          delete txRequest.maxFeePerGas;
+          delete txRequest.maxPriorityFeePerGas;
+        }
+      } catch {
+        // Ignore and let provider estimate if gas price fetch fails.
+      }
+    }
+    txRequest.type = 0;
+    if (!txRequest.gasLimit && signer.provider && typeof signer.provider.estimateGas === "function") {
+      try {
+        txRequest.gasLimit = await signer.provider.estimateGas(txRequest);
+      } catch {
+        // Allow wallet/provider to estimate if needed.
+      }
+    }
+    if (shouldLogTx()) {
+      console.log("[TX_DEBUG] approve", {
+        to: txRequest.to,
+        data: txRequest.data,
+        value: txRequest.value?.toString?.() ?? txRequest.value
+      });
+    }
 
-    const tx = await contract.approve(spender, amount, { type: 0 });
+    const tx = await signer.sendTransaction(txRequest);
     return tx.wait();
   } catch (error) {
     throw normalizeChainError(error, "Failed to approve HLUSD");
@@ -186,6 +231,10 @@ export async function transferHLUSD(recipient: string, amount: string) {
       throw new ChainIntegrationError("missing_env", "Missing NEXT_PUBLIC_HLUSD_ADDRESS");
     }
 
+    if (!isAddress(token) || !isAddress(recipient)) {
+      throw new ChainIntegrationError("invalid_input", "HLUSD transfer address is invalid");
+    }
+
     const numericAmount = Number(amount);
     if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
       throw new ChainIntegrationError("invalid_input", "Funding amount must be greater than zero");
@@ -196,7 +245,38 @@ export async function transferHLUSD(recipient: string, amount: string) {
     const contract = new Contract(token, ERC20_ABI, signer);
 
     const decimals = await contract.decimals();
-    const tx = await contract.transfer(recipient, parseUnits(amount, Number(decimals)), { type: 0 });
+    const txRequest = await contract
+      .getFunction("transfer")
+      .populateTransaction(recipient, parseUnits(amount, Number(decimals)));
+    if (signer.provider && typeof signer.provider.send === "function") {
+      try {
+        const gasPriceHex = (await signer.provider.send("eth_gasPrice", [])) as string;
+        if (gasPriceHex) {
+          txRequest.gasPrice = BigInt(gasPriceHex);
+          delete txRequest.maxFeePerGas;
+          delete txRequest.maxPriorityFeePerGas;
+        }
+      } catch {
+        // Ignore and let provider estimate if gas price fetch fails.
+      }
+    }
+    txRequest.type = 0;
+    if (!txRequest.gasLimit && signer.provider && typeof signer.provider.estimateGas === "function") {
+      try {
+        txRequest.gasLimit = await signer.provider.estimateGas(txRequest);
+      } catch {
+        // Allow wallet/provider to estimate if needed.
+      }
+    }
+    if (shouldLogTx()) {
+      console.log("[TX_DEBUG] transfer", {
+        to: txRequest.to,
+        data: txRequest.data,
+        value: txRequest.value?.toString?.() ?? txRequest.value
+      });
+    }
+
+    const tx = await signer.sendTransaction(txRequest);
     return tx.wait();
   } catch (error) {
     throw normalizeChainError(error, "Failed to transfer HLUSD");
