@@ -23,15 +23,13 @@ The platform is designed around a freelancer-friendly flow:
 - agents can run manually or through scheduled automation
 - revenue is split between the creator and the platform
 
-## DevClash Submission
+## ByteBattle 2k26 Hackathon Submission
 
 - `Track`: Web3
-- `Problem Statement`: PS 03 — Agent Marketplace
+- `Project Title`: Trovia
 - `One-line Description`: A freelancer-focused on-chain AI agent marketplace on HeLa where developers publish agents, buyers activate them with HLUSD, and autonomous agent actions are funded, tracked, and executed on-chain.
 
-## Why This Fits PS 03
-
-Trovia directly implements the required Web3 track marketplace brief:
+## Why This Fits
 
 - `Trading Agent`
 - `Farming Agent`
@@ -498,7 +496,7 @@ npm run automation:watch
 
 ## Demo Deliverables
 
-This repository is our DevClash submission for the Web3 track. The key submission links are below:
+This repository is our ByteBattle 2k26 Hackathon submission for the Web3 track. The key submission links are below:
 
 - `Demo URL`: https://trovia-app-586045943972.asia-south1.run.app
 - `Demo Video`: https://youtu.be/4uzBng_q0rs?si=1A37Qr3d-ZDj7O4D
@@ -737,8 +735,7 @@ Working now:
 - Bhumi
 - Aman
 - Madhura
-- Saad
 
 ## License
 
-Hackathon project for DevClash / HeLa ecosystem demo use.
+Hackathon project for ByteBattle 2k26 Hackathon / HeLa ecosystem demo use.
