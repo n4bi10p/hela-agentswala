@@ -61,7 +61,7 @@ export function WalletConnect() {
     <button
       onClick={isConnected ? handleDisconnect : handleConnect}
       disabled={isConnecting}
-      className="font-mono text-xs hover:bg-white hover:text-black transition-colors duration-150 px-4 py-2 border border-white/20 bracket-btn"
+      className="font-mono text-xs hover:bg-white hover:text-black transition-all duration-300 px-4 py-2 border border-white/20 bracket-btn glow-effect glitch-hover"
     >
       {isConnecting
         ? "CONNECTING..."

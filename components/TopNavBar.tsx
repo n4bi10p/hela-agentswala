@@ -32,10 +32,10 @@ export function TopNavBar() {
           <Link
             key={link.href}
             href={link.href}
-            className={`pb-1 transition-all duration-75 ${
+            className={`font-mono transition-all duration-300 px-3 py-1.5 border glow-effect glitch-hover ${
               isActive(link.href)
-                ? "border-b-2 border-white text-white hover:opacity-80"
-                : "text-white/60 hover:text-white hover:opacity-80"
+                ? "bg-white text-black border-white"
+                : "text-white/60 border-transparent hover:bg-white hover:text-black hover:border-white"
             }`}
           >
             [ {link.label} ]

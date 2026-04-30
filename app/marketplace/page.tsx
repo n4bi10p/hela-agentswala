@@ -92,6 +92,8 @@ const UPCOMING_AGENTS: UpcomingAgent[] = [
   }
 ];
 
+import { useReveal, useStaggerReveal } from "@/hooks/useScrollAnimation";
+
 export default function MarketplacePage() {
   const [selectedType, setSelectedType] = useState("ALL");
   const [agents, setAgents] = useState<MarketplaceAgent[]>([]);
@@ -100,6 +102,13 @@ export default function MarketplacePage() {
   const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Reveal animations
+  const headerRef = useReveal(0);
+  const filterRef = useReveal(100);
+  const agentGridStagger = useStaggerReveal(100);
+  const upcomingHeadRef = useReveal(0);
+  const upcomingStagger = useStaggerReveal(120);
 
   useEffect(() => {
     let active = true;
@@ -219,7 +228,7 @@ export default function MarketplacePage() {
       <TopNavBar />
 
       {/* Page Header */}
-      <header className="px-8 pt-16 pb-8 border-b border-white/10 mt-24">
+      <header ref={headerRef} className="px-8 pt-16 pb-8 border-b border-white/10 mt-24 reveal-up">
         <div className="flex items-center gap-4 mb-4">
           <span className="font-mono text-sm text-white bracket-link cursor-pointer">
             MARKETPLACE
@@ -239,7 +248,7 @@ export default function MarketplacePage() {
       </div>
 
       {/* Filter Tabs */}
-      <section className="flex flex-wrap gap-4 px-8 py-6 bg-black border-b border-white/10 sticky top-24 z-40">
+      <section ref={filterRef} className="flex flex-wrap gap-4 px-8 py-6 bg-black border-b border-white/10 sticky top-24 z-40 reveal-blur">
         {AGENT_TYPES.map((type) => (
           <button
             key={type}
@@ -261,19 +270,20 @@ export default function MarketplacePage() {
           <p className="font-mono text-sm text-white/60 uppercase">Loading agents...</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-8">
+        <div ref={agentGridStagger} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-8">
           {filteredAgents.map((agent) => (
-            <AgentCard
-              key={agent.id}
-              {...agent}
-              isOwnedByCurrentUser={
-                ownedAgentIds.includes(agent.id) ||
-                publishedAgentIds.includes(agent.id) ||
-                (Boolean(connectedWalletLower) &&
-                  Boolean(agent.developer) &&
-                  connectedWalletLower === agent.developer!.toLowerCase())
-              }
-            />
+            <div key={agent.id} data-item>
+              <AgentCard
+                {...agent}
+                isOwnedByCurrentUser={
+                  ownedAgentIds.includes(agent.id) ||
+                  publishedAgentIds.includes(agent.id) ||
+                  (Boolean(connectedWalletLower) &&
+                    Boolean(agent.developer) &&
+                    connectedWalletLower === agent.developer!.toLowerCase())
+                }
+              />
+            </div>
           ))}
         </div>
       )}
@@ -301,22 +311,25 @@ export default function MarketplacePage() {
       )}
 
       <section className="border-t border-white/10 px-8 py-12">
-        <div className="mb-8 flex items-center gap-4">
-          <span className="font-mono text-sm uppercase text-white/60">COMING SOON</span>
-          <span className="font-mono text-sm text-white/20 select-none">░░░░░░░░</span>
-        </div>
-        <div className="mb-8 max-w-3xl">
-          <h2 className="font-headline text-5xl uppercase text-white">Next Valuable Agents</h2>
-          <p className="mt-3 font-body text-xs uppercase leading-relaxed text-white/60">
-            These agents are intentionally listed as upcoming concepts only. They are not live yet, but they represent
-            the next tier of high-value operational automation we want to ship on Trovia.
-          </p>
+        <div ref={upcomingHeadRef} className="reveal-up">
+          <div className="mb-8 flex items-center gap-4">
+            <span className="font-mono text-sm uppercase text-white/60">COMING SOON</span>
+            <span className="font-mono text-sm text-white/20 select-none">░░░░░░░░</span>
+          </div>
+          <div className="mb-8 max-w-3xl">
+            <h2 className="font-headline text-5xl uppercase text-white">Next Valuable Agents</h2>
+            <p className="mt-3 font-body text-xs uppercase leading-relaxed text-white/60">
+              These agents are intentionally listed as upcoming concepts only. They are not live yet, but they represent
+              the next tier of high-value operational automation we want to ship on Trovia.
+            </p>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div ref={upcomingStagger} className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {UPCOMING_AGENTS.map((agent) => (
             <div
               key={agent.name}
+              data-item
               className="flex flex-col gap-5 border border-dashed border-white/20 bg-white/[0.02] p-6"
             >
               <div className="flex items-start justify-between gap-4">
