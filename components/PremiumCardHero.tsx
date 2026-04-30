@@ -17,7 +17,19 @@ export const PremiumCardHero: React.FC = () => {
     const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.z = 10;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ 
+        antialias: true, 
+        alpha: true, 
+        powerPreference: 'default',
+        failIfMajorPerformanceCaveat: false 
+      });
+    } catch (e) {
+      console.error("WebGL Renderer creation failed in PremiumCardHero:", e);
+      return;
+    }
+    
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);

@@ -14,9 +14,20 @@ export const DottedSphere: React.FC = () => {
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.z = 5;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ 
+        antialias: true, 
+        alpha: true,
+        failIfMajorPerformanceCaveat: false
+      });
+    } catch (e) {
+      console.error("WebGL Renderer creation failed in DottedSphere:", e);
+      return;
+    }
+
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);
 
     // Create dotted sphere
@@ -45,8 +56,9 @@ export const DottedSphere: React.FC = () => {
 
     window.addEventListener('mousemove', handleMouseMove);
 
+    let animationFrameId: number;
     const animate = () => {
-      requestAnimationFrame(animate);
+      animationFrameId = requestAnimationFrame(animate);
 
       targetX += (mouseX - targetX) * 0.05;
       targetY += (mouseY - targetY) * 0.05;
@@ -73,7 +85,23 @@ export const DottedSphere: React.FC = () => {
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('resize', handleResize);
-      container.removeChild(renderer.domElement);
+      cancelAnimationFrame(animationFrameId);
+
+      scene.traverse((object: any) => {
+        if (object.geometry) object.geometry.dispose();
+        if (object.material) {
+          if (Array.isArray(object.material)) {
+            object.material.forEach((mat: any) => mat.dispose());
+          } else {
+            object.material.dispose();
+          }
+        }
+      });
+
+      renderer.dispose();
+      if (container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
+      }
     };
   }, []);
 

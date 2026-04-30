@@ -47,8 +47,8 @@ export default function Home() {
           HERO SECTION
           ============================================================ */}
       <section className="relative min-h-screen flex flex-col items-center justify-center border-b border-white/12 pt-24 overflow-hidden">
-        {/* 3D Premium Card Background */}
-        <PremiumCardHero />
+        {/* 3D Premium Card Background - Only render after transition to prevent WebGL context competition */}
+        {showLanding && <PremiumCardHero />}
 
         {/* Parallax floating blurs & Spheres */}
         <div ref={heroBgRef} className="absolute inset-0 pointer-events-none">

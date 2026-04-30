@@ -26,12 +26,12 @@ export const EmulatorEntry: React.FC<EmulatorEntryProps> = ({ onTransitionComple
       renderer = new THREE.WebGLRenderer({ 
         alpha: true, 
         antialias: true, 
-        powerPreference: 'high-performance',
+        powerPreference: 'default', // Changed from high-performance to increase compatibility
         failIfMajorPerformanceCaveat: false 
       });
     } catch (e) {
-      console.error("WebGL not supported or context creation failed", e);
-      onTransitionComplete();
+      console.error("WebGL Renderer creation failed in EmulatorEntry:", e);
+      onTransitionComplete(); // Fallback: Proceed to site even if 3D fails
       return;
     }
 
