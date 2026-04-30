@@ -193,7 +193,7 @@ const FIELD_SELECT_OPTIONS: Record<string, string[]> = {
 
 const FAUCET_URL = "https://testnet-faucet.helachain.com/";
 
-type AgentProfile = (typeof AGENTS)[string] & { developer?: string };
+type AgentProfile = (typeof AGENTS)[string] & { developer?: string; executionCount?: number };
 type AutomationFrequency = "hourly" | "daily" | "weekly" | "monthly";
 type ExecutionPolicyDraft = {
   autoExecute: boolean;
@@ -216,6 +216,7 @@ type RemoteAgent = {
   image: string;
   configSchema: string;
   developer?: string;
+  executionCount?: number;
 };
 
 type AgentRouteResponse = {
@@ -320,6 +321,7 @@ function toAgentProfile(remoteAgent: RemoteAgent): AgentProfile {
     activeCount: remoteAgent.activeCount,
     isLive: remoteAgent.isLive,
     developer: remoteAgent.developer,
+    executionCount: remoteAgent.executionCount,
     config: parsedConfig.length > 0 ? parsedConfig : (preset?.config || [])
   };
 }
@@ -879,7 +881,7 @@ export default function AgentDetailPage() {
     };
   }, [agentId]);
 
-  const agent = useMemo(() => agentFromBackend || localAgent || null, [agentFromBackend, localAgent]);
+  const agent = useMemo(() => (agentFromBackend || localAgent || AGENTS["1"]) as AgentProfile, [agentFromBackend, localAgent]);
   const automationAgentType = agentFromBackend?.type || localAgent?.type || "";
   const platformFee = useMemo(() => (agent ? calculatePlatformFee(agent.price) : 0), [agent]);
   const developerPayout = useMemo(() => (agent ? calculateDeveloperPayout(agent.price) : 0), [agent]);
@@ -1418,6 +1420,23 @@ export default function AgentDetailPage() {
               }
             />
           )}
+
+          {/* Agent Usage Stats */}
+          <div className="border border-white/12 bg-white/5 p-5">
+            <h3 className="mb-4 font-headline text-lg uppercase text-white">Agent Usage Stats</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="font-mono text-xs uppercase text-white/50 mb-1">Purchases</p>
+                <p className="font-mono text-xl text-white">{agent.activeCount || 0}</p>
+                <p className="font-mono text-[10px] text-white/30 uppercase mt-1">Total Activations</p>
+              </div>
+              <div>
+                <p className="font-mono text-xs uppercase text-white/50 mb-1">Usage</p>
+                <p className="font-mono text-xl text-white">{agent.executionCount || 0}</p>
+                <p className="font-mono text-[10px] text-white/30 uppercase mt-1">Total Executions</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="flex flex-col gap-6 lg:col-span-2">

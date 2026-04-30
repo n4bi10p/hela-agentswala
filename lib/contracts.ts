@@ -379,3 +379,14 @@ export async function fetchExecutionEventsForUser(
     throw normalizeChainError(error, "Failed to fetch execution events");
   }
 }
+
+export async function fetchAgentExecutionCount(agentId: number): Promise<number> {
+  try {
+    const executor = await getExecutorContract(false);
+    const filter = executor.filters.ExecutionLogged(agentId, null);
+    const events = await executor.queryFilter(filter, 0, "latest");
+    return events.length;
+  } catch (error) {
+    throw normalizeChainError(error, "Failed to fetch agent execution count");
+  }
+}

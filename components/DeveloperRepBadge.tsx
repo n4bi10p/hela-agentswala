@@ -64,7 +64,10 @@ export function DeveloperRepBadge({ developerAddress, compact = false }: Develop
                   {rep.totalAgents} agent{rep.totalAgents !== 1 ? "s" : ""}
                 </p>
                 {rep.totalActivations > 0 && (
-                  <p className="text-[10px] text-white/30">{rep.totalActivations} total activations</p>
+                  <p className="text-[10px] text-white/30">{rep.totalActivations} total purchases</p>
+                )}
+                {rep.totalExecutions > 0 && (
+                  <p className="text-[10px] text-white/30">{rep.totalExecutions} total executions</p>
                 )}
               </>
             ) : (

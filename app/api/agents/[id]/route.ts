@@ -1,6 +1,6 @@
 import { formatUnits } from "ethers";
 import { NextResponse } from "next/server";
-import { fetchAgentActivationCount, fetchAgentById } from "@/lib/contracts";
+import { fetchAgentActivationCount, fetchAgentById, fetchAgentExecutionCount } from "@/lib/contracts";
 import { listStoredAgents } from "@/lib/automationStore";
 import {
   getAgentImage,
@@ -47,9 +47,10 @@ export async function GET(_request: Request, { params }: RouteParams) {
   }
 
   try {
-    const [agent, activeCount, storedAgents] = await Promise.all([
+    const [agent, activeCount, executionCount, storedAgents] = await Promise.all([
       fetchAgentById(parsedId),
       fetchAgentActivationCount(parsedId).catch(() => 0),
+      fetchAgentExecutionCount(parsedId).catch(() => 0),
       listStoredAgents().catch(() => [])
     ]);
 
@@ -69,6 +70,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
           type: toAgentTypeLabel(agent.agentType),
           price: toPrice(agent.priceHLUSD),
           activeCount,
+          executionCount,
           isLive: agent.isActive,
           image: getAgentImage(agent.agentType),
           configSchema: agent.configSchema,

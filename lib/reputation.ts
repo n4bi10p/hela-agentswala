@@ -40,6 +40,7 @@ export type DeveloperReputation = {
   totalReviews: number;
   totalAgents: number;
   totalActivations: number;
+  totalExecutions: number;
   score: number;
 };
 
@@ -149,14 +150,17 @@ export async function upsertReview(params: {
 
 export async function fetchDeveloperReputation(
   developerAddress: string,
-  agentIds: string[]
+  agentIds: string[],
+  totalActivations: number = 0,
+  totalExecutions: number = 0
 ): Promise<DeveloperReputation> {
   const empty: DeveloperReputation = {
     developerAddress,
     averageStars: 0,
     totalReviews: 0,
     totalAgents: agentIds.length,
-    totalActivations: 0,
+    totalActivations,
+    totalExecutions,
     score: 0
   };
 
@@ -179,15 +183,19 @@ export async function fetchDeveloperReputation(
   const totalStars = rows.reduce((sum, r) => sum + r.stars, 0);
   const averageStars = totalReviews > 0 ? Number((totalStars / totalReviews).toFixed(1)) : 0;
 
-  // Score = weighted average (70%) + activation bonus (30%, capped at 100 activations normalized)
-  const score = Number((averageStars * 20).toFixed(1)); // 5 stars = 100 score
+  // Score = Ratings (50%) + Purchases/Activations (25%, capped at 50) + Usage/Executions (25%, capped at 500)
+  const ratingScore = (averageStars / 5) * 50;
+  const activationScore = Math.min(totalActivations, 50) / 50 * 25;
+  const executionScore = Math.min(totalExecutions, 500) / 500 * 25;
+  const score = Number((ratingScore + activationScore + executionScore).toFixed(1));
 
   return {
     developerAddress,
     averageStars,
     totalReviews,
     totalAgents: agentIds.length,
-    totalActivations: 0, // enriched by caller
+    totalActivations,
+    totalExecutions,
     score
   };
 }
